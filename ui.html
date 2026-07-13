@@ -111,6 +111,14 @@
   }
   .times button.sel{color:var(--led); border-color:var(--led); background:#1C1810}
   .times button:focus-visible{outline:2px solid var(--led); outline-offset:2px}
+  .times button.custom:not(.sel){border-style:dashed}
+  .times .customInput{
+    width:100%; text-align:center; background:transparent; border:none; outline:none;
+    color:var(--led); font-family:var(--mono); font-size:14px; font-weight:500;
+    -moz-appearance:textfield; padding:0;
+  }
+  .times .customInput::-webkit-outer-spin-button,
+  .times .customInput::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
 
   /* ----- fade buttons ----- */
   .actions{display:flex; gap:10px}
@@ -217,7 +225,7 @@
 <div class="times" id="times">
   <button data-s="3">3s</button>
   <button data-s="5" class="sel">5s</button>
-  <button data-s="8">8s</button>
+  <button class="custom" id="customBtn" data-s="custom" title="Set a custom fade time">Custom</button>
 </div>
 
 <div class="actions">
@@ -374,17 +382,66 @@ fader.addEventListener('keydown', e => {
   e.preventDefault();
 });
 
-/* ---- fade time selector ---- */
+/* ---- fade time selector: 3s / 5s / custom ---- */
+const customBtn = document.getElementById('customBtn');
+let customValue = null;   // null until the user sets one
+
+function refreshCustomLabel() {
+  if (customValue == null) { customBtn.textContent = 'Custom'; customBtn.dataset.s = 'custom'; }
+  else { customBtn.textContent = customValue + 's'; customBtn.dataset.s = customValue; }
+}
 function syncTimeButtons(sec) {
   fadeSeconds = sec;
+  if (sec !== 3 && sec !== 5) customValue = sec;   // any non-preset lands on the custom button
+  refreshCustomLabel();
   document.querySelectorAll('.times button')
     .forEach(x => x.classList.toggle('sel', +x.dataset.s === sec));
 }
+function applyFade(sec) {
+  syncTimeButtons(sec);
+  if (apiReady) pywebview.api.set_fade_seconds(sec);   // מסנכרן את כל המסכים
+}
+function editCustom() {
+  if (customBtn.querySelector('input')) return;
+  const inp = document.createElement('input');
+  inp.type = 'number'; inp.min = '1'; inp.max = '60'; inp.step = '1';
+  inp.value = customValue != null ? customValue : 10;
+  inp.className = 'customInput';
+  customBtn.textContent = '';
+  customBtn.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = save => {
+    if (done) return; done = true;
+    inp.removeEventListener('blur', onBlur);
+    if (save) {
+      let v = Math.round(parseFloat(inp.value));
+      if (!isFinite(v)) v = customValue != null ? customValue : 5;
+      customValue = Math.max(1, Math.min(60, v));
+      applyFade(customValue);
+    } else {
+      refreshCustomLabel();
+    }
+  };
+  const onBlur = () => finish(true);
+  inp.addEventListener('blur', onBlur);
+  inp.addEventListener('keydown', ev => {
+    ev.stopPropagation();                 // keep global 1–4 / space shortcuts out of the field
+    if (ev.key === 'Enter')      { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape'){ ev.preventDefault(); finish(false); }
+  });
+  inp.addEventListener('click', ev => ev.stopPropagation());
+}
 document.getElementById('times').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
-  syncTimeButtons(+b.dataset.s);
-  if (apiReady) pywebview.api.set_fade_seconds(fadeSeconds);   // מסנכרן את כל המסכים
+  if (b === customBtn) {
+    if (customValue == null || customBtn.classList.contains('sel')) editCustom();  // set / edit
+    else applyFade(customValue);                                                    // just use it
+    return;
+  }
+  applyFade(+b.dataset.s);
 });
+refreshCustomLabel();
 
 /* ---- actions ----
    The UI decides the target and starts moving IMMEDIATELY —
