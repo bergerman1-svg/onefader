@@ -1,0 +1,49 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyinstaller pywebview pycaw comtypes websockets qrcode pillow
+
+      - name: Build OneFader.exe
+        run: >
+          pyinstaller --onefile --windowed --name OneFader
+          --icon OneFader.ico
+          --add-data "ui.html;."
+          --add-data "remote.html;."
+          onefader.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OneFader-Windows
+          path: dist/OneFader.exe
+
+      - name: Publish to "win-latest" release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view win-latest >/dev/null 2>&1 \
+            && gh release upload win-latest dist/OneFader.exe --clobber \
+            || gh release create win-latest dist/OneFader.exe \
+                 --title "OneFader for Windows — latest" \
+                 --notes "Automated Windows build. Double-click OneFader.exe to run — no Python needed."

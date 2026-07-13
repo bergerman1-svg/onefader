@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneFader</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=JetBrains+Mono:wght@500;700&family=Unbounded:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0C0E12; --panel:#14171D; --line:#232833;
+    --led:#FFB454; --led-dim:#2A2418;
+    --ok:#3DDC84; --danger:#FF5D5D;
+    --text:#E8EAEF; --muted-text:#8B93A3;
+    --mono:'JetBrains Mono',Consolas,monospace;
+    --sans:'Heebo',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--sans);
+    display:flex; flex-direction:column; padding:14px 20px 16px; gap:10px;
+    overflow:hidden; touch-action:none;
+  }
+
+  /* ----- header: brand + readout on one line to give the fader room ----- */
+  header{display:flex; align-items:center; justify-content:space-between}
+  .logo{display:flex; align-items:center; gap:11px}
+  .badge{
+    width:40px; height:40px; border-radius:11px; flex:none;
+    background:linear-gradient(165deg,#1B2029,#101319);
+    border:1px solid #2B313D; position:relative;
+    box-shadow:0 3px 10px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .badge::before{
+    content:""; position:absolute; inset:-1px; border-radius:12px; z-index:-1;
+    background:radial-gradient(60% 60% at 50% 30%, rgba(255,180,84,.35), transparent 70%);
+    filter:blur(6px);
+  }
+  .badge svg{display:block; overflow:visible}
+  .badge .track{fill:#0B0D11; stroke:#262C38; stroke-width:1}
+  .badge .fill{fill:var(--led); filter:drop-shadow(0 0 5px rgba(255,180,84,.8))}
+  .badge .knob{fill:url(#knobGrad); stroke:#5A6375; stroke-width:1}
+  .badge .knobline{stroke:var(--led); stroke-width:1.8; stroke-linecap:round;
+    filter:drop-shadow(0 0 3px rgba(255,180,84,.9))}
+  .wordmark{font-family:'Unbounded',var(--mono); line-height:1}
+  .wordmark .one{font-weight:500; font-size:16px; color:var(--text); letter-spacing:.02em}
+  .wordmark .fdr{font-weight:800; font-size:16px; color:var(--led); letter-spacing:.02em;
+    text-shadow:0 0 14px rgba(255,180,84,.4)}
+  .wordmark small{display:block; font-family:var(--mono); font-weight:500; font-size:8.5px;
+    letter-spacing:.34em; color:var(--muted-text); margin-top:4px}
+
+  /* boot: logo breathes in, main fader does a console LED sweep */
+  @keyframes logoIn{from{opacity:0; transform:translateY(-6px)} to{opacity:1; transform:none}}
+  header{animation:logoIn .6s ease-out both}
+  .right{display:flex; align-items:center; gap:10px}
+  .readout{
+    font-family:var(--mono); font-weight:700; font-size:30px; line-height:1;
+    letter-spacing:-.02em; font-variant-numeric:tabular-nums;
+  }
+  .readout small{font-size:.45em; color:var(--muted-text); font-weight:500}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);
+       box-shadow:0 0 8px var(--ok); transition:background .3s, box-shadow .3s}
+  .dot.off{background:var(--danger); box-shadow:0 0 8px var(--danger)}
+
+  .statusline{
+    text-align:center; min-height:18px; font-size:12.5px; color:var(--muted-text);
+    letter-spacing:.03em; cursor:pointer; font-family:var(--mono);
+  }
+  .statusline.active{color:var(--led)}
+
+  /* ----- the fader: console-style LED strip, as tall as possible ----- */
+  .fader-zone{flex:1; display:flex; justify-content:center; min-height:0}
+  .fader{
+    position:relative; width:118px; height:100%; border-radius:16px;
+    background:var(--panel); border:1px solid var(--line);
+    display:flex; flex-direction:column-reverse; gap:3px; padding:12px 32px;
+    cursor:grab; touch-action:none;
+  }
+  .fader:active{cursor:grabbing}
+  .fader:focus-visible{outline:2px solid var(--led); outline-offset:3px}
+  .seg{
+    flex:1; border-radius:3px; background:var(--led-dim);
+    transition:background .05s linear, box-shadow .05s linear;
+  }
+  .seg.lit{background:var(--led); box-shadow:0 0 6px rgba(255,180,84,.55)}
+  .seg.lit.top{background:#FFD08A}
+  .cap{
+    position:absolute; left:12px; right:12px; height:32px; border-radius:9px;
+    background:linear-gradient(180deg,#3A414F,#20242D);
+    border:1px solid #4A5262; box-shadow:0 4px 14px rgba(0,0,0,.55);
+    pointer-events:none;
+  }
+  .cap::after{content:""; position:absolute; left:10px; right:10px; top:50%;
+    height:2px; background:var(--led); border-radius:1px; transform:translateY(-50%)}
+  .unity{position:absolute; left:6px; right:6px; height:0; pointer-events:none;
+    border-top:2px solid rgba(232,234,239,.55)}
+  .unity::before{content:"0"; position:absolute; left:-2px; top:-9px;
+    font-family:var(--mono); font-size:10px; font-weight:700; color:rgba(232,234,239,.65);
+    background:var(--panel); padding:0 3px; line-height:16px}
+  .unity::after{content:"dB"; position:absolute; right:-2px; top:-9px;
+    font-family:var(--mono); font-size:9px; color:rgba(232,234,239,.45);
+    background:var(--panel); padding:0 3px; line-height:16px}
+
+  /* ----- fade time selector ----- */
+  .times{display:flex; gap:8px}
+  .times button{
+    flex:1; padding:10px 0; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--muted-text);
+    font-family:var(--mono); font-size:14px; font-weight:500; cursor:pointer;
+  }
+  .times button.sel{color:var(--led); border-color:var(--led); background:#1C1810}
+  .times button:focus-visible{outline:2px solid var(--led); outline-offset:2px}
+
+  /* ----- fade buttons ----- */
+  .actions{display:flex; gap:10px}
+  .actions button{
+    flex:1; padding:18px 0; border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); cursor:pointer;
+    font-family:var(--mono); font-size:16px; font-weight:700; letter-spacing:.1em;
+    transition:transform .05s;
+  }
+  .actions button:active{transform:scale(.97)}
+  .actions button:focus-visible{outline:2px solid var(--led); outline-offset:2px}
+  #btnIn{color:var(--ok)} #btnOut{color:var(--danger)}
+
+  /* ----- remote button + QR overlay ----- */
+  .remoteBtn{width:36px; height:36px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    color:var(--muted-text)}
+  .remoteBtn:hover{color:var(--led); border-color:var(--led)}
+  .remoteBtn svg{display:block}
+  #qrOverlay{position:fixed; inset:0; background:rgba(6,8,11,.86); backdrop-filter:blur(6px);
+    display:none; align-items:center; justify-content:center; z-index:30}
+  #qrOverlay.open{display:flex}
+  .qrCard{background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:28px 30px; display:flex; flex-direction:column; align-items:center; gap:16px;
+    width:min(320px, 90vw); text-align:center}
+  .qrCard h2{font-family:'Unbounded',var(--mono); font-size:15px; font-weight:800}
+  .qrCard h2 span{color:var(--led)}
+  .qrCard img{width:190px; height:190px; border-radius:12px; background:#fff; padding:8px}
+  .qrCard .url{font-family:var(--mono); font-size:13px; color:var(--muted-text);
+    -webkit-user-select:text; user-select:text}
+  .qrCard .pin{font-family:var(--mono); font-size:34px; font-weight:700; letter-spacing:.3em;
+    text-indent:.3em; color:var(--led)}
+  .qrCard .pinlbl{font-family:var(--mono); font-size:10px; letter-spacing:.3em; color:var(--muted-text);
+    margin-top:-12px}
+  .qrCard .hint{font-size:12.5px; color:var(--muted-text); line-height:1.5}
+  .qrCard .close{margin-top:4px; padding:11px 34px; border-radius:11px; border:1px solid var(--line);
+    background:none; color:var(--text); font-family:var(--sans); font-size:14px; cursor:pointer}
+
+  .credit{text-align:center; font-family:var(--mono); font-size:9.5px; letter-spacing:.08em;
+    color:var(--muted-text); opacity:.8; margin-top:6px; flex:none}
+
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">
+    <span class="badge">
+      <svg width="18" height="28" viewBox="0 0 18 28" aria-hidden="true">
+        <defs>
+          <linearGradient id="knobGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#454E5F"/><stop offset="1" stop-color="#232833"/>
+          </linearGradient>
+        </defs>
+        <rect class="track" x="6.5" y="0.5" width="5" height="27" rx="2.5"/>
+        <rect class="fill" id="logoFill" x="7.5" y="14" width="3" height="13" rx="1.5"/>
+        <g id="logoKnob">
+          <rect class="knob" x="0.5" y="9" width="17" height="10" rx="3"/>
+          <line class="knobline" x1="4.5" y1="14" x2="13.5" y2="14"/>
+        </g>
+      </svg>
+    </span>
+    <span class="wordmark">
+      <span class="one">ONE</span><span class="fdr">FADER</span>
+      <small>ONE&nbsp;MOVE.&nbsp;DONE.</small>
+    </span>
+  </span>
+  <span class="right">
+    <button class="remoteBtn" id="remoteBtn" title="Control from your phone" aria-label="Remote control">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="2" width="10" height="20" rx="2.5"/>
+        <line x1="11" y1="18.5" x2="13" y2="18.5"/>
+      </svg>
+    </button>
+    <span class="dot" id="dot"></span>
+    <span class="readout"><span id="pct">--</span><small>%</small></span>
+  </span>
+</header>
+
+<div id="qrOverlay">
+  <div class="qrCard">
+    <h2>PHONE <span>REMOTE</span></h2>
+    <img id="qrImg" alt="Scan to open the remote">
+    <div class="url" id="qrUrl"></div>
+    <div class="pin" id="qrPin"></div>
+    <div class="pinlbl">PIN</div>
+    <div class="hint">Scan with the phone camera.<br>Phone &amp; computer must be on the same Wi-Fi.</div>
+    <button class="close" id="qrClose">Close</button>
+  </div>
+</div>
+
+<div class="fader-zone">
+  <div class="fader" id="fader" tabindex="0" role="slider"
+       aria-label="Master volume" aria-valuemin="0" aria-valuemax="100">
+    <div class="unity" id="unity"></div>
+    <div class="cap" id="cap"></div>
+  </div>
+</div>
+
+<div class="statusline" id="statusline">&nbsp;</div>
+
+<div class="times" id="times">
+  <button data-s="3">3s</button>
+  <button data-s="5" class="sel">5s</button>
+  <button data-s="8">8s</button>
+</div>
+
+<div class="actions">
+  <button id="btnIn">FADE IN</button>
+  <button id="btnOut">FADE OUT</button>
+</div>
+
+<div class="credit">© 2026 Avi Berger Productions. All rights reserved.</div>
+
+<script>
+const SEGS = 34;
+const fader = document.getElementById('fader');
+const cap   = document.getElementById('cap');
+const pct   = document.getElementById('pct');
+const dot   = document.getElementById('dot');
+const statusline = document.getElementById('statusline');
+
+let level = 0, dragging = false, fadeSeconds = 5, apiReady = false;
+let anim = null;   // client-side fade animation state: {start, target, duration, t0, raf}
+
+/* build LED segments */
+const segs = [];
+for (let i = 0; i < SEGS; i++) {
+  const s = document.createElement('div');
+  s.className = 'seg';
+  fader.appendChild(s);
+  segs.push(s);
+}
+
+const logoKnob = document.getElementById('logoKnob');
+const logoFill = document.getElementById('logoFill');
+
+const UNITY = 0.75;   // כמו בקונסולה: 0dB בשלושת-רבעי המהלך
+const unity = document.getElementById('unity');
+
+function render() {
+  const lit = Math.round(level * SEGS);
+  segs.forEach((s, i) => {
+    s.classList.toggle('lit', i < lit);
+    s.classList.toggle('top', i === lit - 1);
+  });
+  const pad = 12, capH = 32;
+  const usable = fader.clientHeight - pad * 2 - capH;
+  cap.style.bottom = (pad + usable * level) + 'px';
+  unity.style.bottom = (pad + usable * UNITY + capH / 2) + 'px';
+  pct.textContent = Math.round(level * 100);
+  fader.setAttribute('aria-valuenow', Math.round(level * 100));
+  dot.classList.toggle('off', level < 0.005);
+
+  /* the logo is alive: its tiny fader mirrors the real level */
+  const knobY = 0.5 + (1 - level) * 17;
+  logoKnob.setAttribute('transform', `translate(0 ${knobY - 9})`);
+  logoFill.setAttribute('y', knobY + 5);
+  logoFill.setAttribute('height', Math.max(0, 22.5 - knobY));
+}
+
+/* ---- boot: console-style LED sweep on the main fader ---- */
+let booting = false;
+function bootSweep() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  booting = true;
+  const t0 = performance.now(), DUR = 900;
+  (function frame(now) {
+    const t = Math.min(1, (now - t0) / DUR);
+    // up then back down: 0→1→0
+    const sweep = t < 0.55 ? t / 0.55 : 1 - (t - 0.55) / 0.45;
+    const lit = Math.round(sweep * SEGS);
+    segs.forEach((s, i) => {
+      s.classList.toggle('lit', i < lit);
+      s.classList.toggle('top', i === lit - 1);
+    });
+    if (t < 1) requestAnimationFrame(frame);
+    else { booting = false; render(); }
+  })(performance.now());
+}
+
+/* ---- client-side fade animation: the fader visibly rides up/down ----
+   Mirrors the backend curve exactly (same smoothstep + duration),
+   so what you see matches what you hear. */
+const smoothstep = t => t * t * (3 - 2 * t);
+
+function startAnim(target, duration) {
+  stopAnim();
+  const start = level, t0 = performance.now();
+  function frame(now) {
+    const t = Math.min(1, (now - t0) / (duration * 1000));
+    level = start + (target - start) * smoothstep(t);
+    render();
+    if (t < 1 && anim) anim.raf = requestAnimationFrame(frame);
+    else { anim = null; setStatus('', false); }
+  }
+  anim = { raf: requestAnimationFrame(frame) };
+}
+function stopAnim() {
+  if (anim) { cancelAnimationFrame(anim.raf); anim = null; }
+}
+
+/* ---- dragging the fader ---- */
+function levelFromEvent(e) {
+  const r = fader.getBoundingClientRect();
+  const y = (e.touches ? e.touches[0].clientY : e.clientY);
+  const pad = 12;
+  let v = Math.max(0, Math.min(1, (r.bottom - pad - y) / (r.height - pad * 2)));
+  if (Math.abs(v - UNITY) < 0.015) v = UNITY;   // סנאפ עדין ל-0dB, כמו חריץ בפיידר
+  return v;
+}
+/* מגביל קצב: גשר pywebview נחנק מ-120 קריאות/שנייה. 30ms = חלק ובלי חנק */
+let lastSent = 0;
+function pushLevel(final) {
+  if (!apiReady) return;
+  const now = performance.now();
+  if (final || now - lastSent > 30) { pywebview.api.set_level(level); lastSent = now; }
+}
+
+/* גרירה יחסית — כמו פיידר אמיתי: תופסים ומזיזים, בלי קפיצה לנקודת המגע.
+   Shift = מצב עדין (רבע קצב) לכיוונון מדויק. */
+let dragStartY = 0, dragStartLevel = 0;
+function startDrag(e) {
+  stopAnim(); setStatus('', false); dragging = true;
+  dragStartY = e.clientY; dragStartLevel = level;
+}
+function moveDrag(e) {
+  if (!dragging) return;
+  const r = fader.getBoundingClientRect();
+  const usable = r.height - 24;
+  const fine = e.shiftKey ? 0.25 : 1;
+  let v = dragStartLevel + ((dragStartY - e.clientY) / usable) * fine;
+  level = Math.max(0, Math.min(1, v));
+  if (Math.abs(level - UNITY) < 0.006) level = UNITY;   // דיטנט עדין ב-0dB
+  render();
+  pushLevel();
+  e.preventDefault();
+}
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  pushLevel(true);                       // הערך המדויק האחרון — תמיד נשלח
+  if (level > 0.05) uiRestore = level;   // manual level = the new "show level"
+}
+
+fader.addEventListener('pointerdown', e => { fader.setPointerCapture(e.pointerId); startDrag(e); });
+fader.addEventListener('pointermove', e => moveDrag(e));
+fader.addEventListener('pointerup', endDrag);
+fader.addEventListener('pointercancel', endDrag);
+
+/* arrow keys on the fader */
+fader.addEventListener('keydown', e => {
+  const step = e.shiftKey ? 0.1 : 0.02;
+  if (e.key === 'ArrowUp')        level = Math.min(1, level + step);
+  else if (e.key === 'ArrowDown') level = Math.max(0, level - step);
+  else return;
+  stopAnim(); render();
+  pushLevel(true);
+  e.preventDefault();
+});
+
+/* ---- fade time selector ---- */
+function syncTimeButtons(sec) {
+  fadeSeconds = sec;
+  document.querySelectorAll('.times button')
+    .forEach(x => x.classList.toggle('sel', +x.dataset.s === sec));
+}
+document.getElementById('times').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  syncTimeButtons(+b.dataset.s);
+  if (apiReady) pywebview.api.set_fade_seconds(fadeSeconds);   // מסנכרן את כל המסכים
+});
+
+/* ---- actions ----
+   The UI decides the target and starts moving IMMEDIATELY —
+   the backend call runs in parallel with the same target & curve. */
+let uiRestore = 0.8;   // the level FADE IN returns to (last level you worked at)
+
+function doFadeIn() {
+  // rise to the remembered level; if already there (or above) — continue to full
+  const target = (level < uiRestore - 0.02) ? uiRestore : 1.0;
+  startAnim(target, fadeSeconds);
+  setStatus('FADING IN — click to stop', true);
+  if (apiReady) pywebview.api.fade_to(target, fadeSeconds);
+}
+function doFadeOut() {
+  if (level > 0.05) uiRestore = level;   // remember where we were
+  startAnim(0, fadeSeconds);
+  setStatus('FADING OUT — click to stop', true);
+  if (apiReady) pywebview.api.fade_to(0, fadeSeconds);
+}
+document.getElementById('btnIn').addEventListener('click', doFadeIn);
+document.getElementById('btnOut').addEventListener('click', doFadeOut);
+
+async function stopFade() {
+  stopAnim(); setStatus('', false);
+  if (apiReady) {
+    const s = await pywebview.api.stop_fade();
+    level = s.muted ? 0 : s.level; render();
+  }
+}
+statusline.addEventListener('click', stopFade);
+
+/* Space = smart fade (out if audible, in if silent). Esc = stop. */
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target === document.body) {
+    (level > 0.01 ? doFadeOut() : doFadeIn());
+    e.preventDefault();
+  }
+  if (e.key === 'Escape') stopFade();
+});
+
+function setStatus(txt, active) {
+  statusline.innerHTML = txt || '&nbsp;';
+  statusline.classList.toggle('active', !!active);
+}
+
+/* ---- sync with the system (external volume changes, startup) ----
+   Skipped while dragging or while a fade animation is running,
+   so the animation stays perfectly smooth. */
+async function poll() {
+  if (apiReady && !dragging && !anim && !booting) {
+    try {
+      const s = await pywebview.api.status();
+      level = s.muted ? 0 : s.level;
+      if (s.fadeSeconds && s.fadeSeconds !== fadeSeconds) syncTimeButtons(s.fadeSeconds);
+      if (!poll.seeded && level > 0.05) { uiRestore = level; poll.seeded = true; }
+      render();
+    } catch (err) { /* window still booting */ }
+  }
+  setTimeout(poll, 60);   // CoreAudio זול — 16Hz נותן תחושת סימולטניות עם הרימוט
+}
+
+/* ---- phone remote ---- */
+const qrOverlay = document.getElementById('qrOverlay');
+document.getElementById('remoteBtn').addEventListener('click', async () => {
+  if (!apiReady) return;
+  const info = await pywebview.api.remote_start();
+  document.getElementById('qrImg').src = info.qr;
+  document.getElementById('qrUrl').textContent = info.url;
+  document.getElementById('qrPin').textContent = info.pin;
+  qrOverlay.classList.add('open');
+});
+document.getElementById('qrClose').addEventListener('click', () => qrOverlay.classList.remove('open'));
+qrOverlay.addEventListener('click', e => { if (e.target === qrOverlay) qrOverlay.classList.remove('open'); });
+
+window.addEventListener('pywebviewready', () => { apiReady = true; });
+window.addEventListener('resize', render);
+render();
+bootSweep();
+poll();
+</script>
+</body>
+</html>

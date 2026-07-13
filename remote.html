@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>OneFader Remote</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Unbounded:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0C0E12; --panel:#14171D; --line:#232833;
+    --led:#FFB454; --led-dim:#2A2418;
+    --ok:#3DDC84; --danger:#FF5D5D;
+    --text:#E8EAEF; --muted-text:#8B93A3;
+    --mono:'JetBrains Mono',Consolas,monospace;
+    --disp:'Unbounded',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--disp);
+    display:flex; flex-direction:column; padding:14px 20px calc(16px + env(safe-area-inset-bottom));
+    gap:10px; overflow:hidden; touch-action:none;
+  }
+
+  header{display:flex; align-items:center; justify-content:space-between}
+  .wordmark{font-family:var(--disp); font-size:15px; line-height:1}
+  .wordmark .one{font-weight:500} .wordmark .fdr{font-weight:800; color:var(--led)}
+  .wordmark small{display:block; font-family:var(--mono); font-weight:500; font-size:8px;
+    letter-spacing:.34em; color:var(--muted-text); margin-top:3px}
+  .right{display:flex; align-items:center; gap:10px}
+  .readout{font-family:var(--mono); font-weight:700; font-size:30px; line-height:1;
+    font-variant-numeric:tabular-nums}
+  .readout small{font-size:.45em; color:var(--muted-text); font-weight:500}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);
+       box-shadow:0 0 8px var(--ok); transition:background .3s}
+  .dot.off{background:var(--danger); box-shadow:0 0 8px var(--danger)}
+
+  .fader-zone{flex:1; display:flex; justify-content:center; min-height:0}
+  .fader{
+    position:relative; width:128px; height:100%; border-radius:16px;
+    background:var(--panel); border:1px solid var(--line);
+    display:flex; flex-direction:column-reverse; gap:3px; padding:12px 36px;
+    touch-action:none;
+  }
+  .seg{flex:1; border-radius:3px; background:var(--led-dim);
+    transition:background .05s linear}
+  .seg.lit{background:var(--led); box-shadow:0 0 6px rgba(255,180,84,.55)}
+  .seg.lit.top{background:#FFD08A}
+  .cap{position:absolute; left:12px; right:12px; height:36px; border-radius:10px;
+    background:linear-gradient(180deg,#3A414F,#20242D);
+    border:1px solid #4A5262; box-shadow:0 4px 14px rgba(0,0,0,.55); pointer-events:none}
+  .cap::after{content:""; position:absolute; left:11px; right:11px; top:50%;
+    height:2px; background:var(--led); border-radius:1px; transform:translateY(-50%)}
+  .unity{position:absolute; left:6px; right:6px; height:0; pointer-events:none;
+    border-top:2px solid rgba(232,234,239,.55)}
+  .unity::before{content:"0"; position:absolute; left:-2px; top:-9px;
+    font-family:var(--mono); font-size:10px; font-weight:700; color:rgba(232,234,239,.65);
+    background:var(--panel); padding:0 3px; line-height:16px}
+  .unity::after{content:"dB"; position:absolute; right:-2px; top:-9px;
+    font-family:var(--mono); font-size:9px; color:rgba(232,234,239,.45);
+    background:var(--panel); padding:0 3px; line-height:16px}
+
+  .statusline{text-align:center; min-height:18px; font-size:12.5px; color:var(--muted-text);
+    letter-spacing:.03em; cursor:pointer; font-family:var(--mono)}
+  .statusline.active{color:var(--led)}
+  .credit{text-align:center; font-family:var(--mono); font-size:9.5px; letter-spacing:.08em;
+    color:var(--muted-text); opacity:.8; margin-top:6px}
+
+  .times{display:flex; gap:8px}
+  .times button{flex:1; padding:12px 0; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--muted-text);
+    font-family:var(--mono); font-size:15px; font-weight:500}
+  .times button.sel{color:var(--led); border-color:var(--led); background:#1C1810}
+
+  .actions{display:flex; gap:10px}
+  .actions button{flex:1; padding:20px 0; border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); font-family:var(--mono); font-size:16px; font-weight:700;
+    letter-spacing:.1em; transition:transform .05s}
+  .actions button:active{transform:scale(.97)}
+  #btnIn{color:var(--ok)} #btnOut{color:var(--danger)}
+
+  /* ----- PIN screen ----- */
+  #pinScreen{position:fixed; inset:0; background:var(--bg); z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px;
+    padding:30px}
+  #pinScreen .wordmark{font-size:24px; text-align:center}
+  #pinScreen .hint{font-family:var(--mono); font-size:12px; letter-spacing:.15em;
+    color:var(--muted-text); text-align:center}
+  #pinInput{width:210px; padding:16px 0; text-align:center; letter-spacing:.5em; text-indent:.5em;
+    font-family:var(--mono); font-size:30px; font-weight:700; color:var(--text);
+    background:var(--panel); border:1px solid var(--line); border-radius:14px; outline:none}
+  #pinInput:focus{border-color:var(--led)}
+  #pinInput.err{border-color:var(--danger); animation:shake .3s}
+  @keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  #pinGo{width:210px; padding:15px 0; border-radius:14px; border:none; cursor:pointer;
+    background:var(--led); color:#171208; font-family:var(--disp); font-weight:800;
+    font-size:15px; letter-spacing:.06em}
+  #connState{position:fixed; top:0; left:0; right:0; padding:5px; text-align:center;
+    font-family:var(--mono); font-size:11px; letter-spacing:.2em; background:var(--danger);
+    color:#fff; transform:translateY(-100%); transition:transform .3s; z-index:20}
+  #connState.show{transform:none}
+
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
+</style>
+</head>
+<body>
+
+<div id="connState">RECONNECTING…</div>
+
+<div id="pinScreen">
+  <div class="wordmark"><span class="one">ONE</span><span class="fdr">FADER</span>
+    <small style="letter-spacing:.34em">REMOTE</small></div>
+  <div class="hint">ENTER THE PIN SHOWN<br>ON THE COMPUTER</div>
+  <input id="pinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="one-time-code" placeholder="····">
+  <button id="pinGo">CONNECT</button>
+</div>
+
+<header>
+  <span class="wordmark"><span class="one">ONE</span><span class="fdr">FADER</span>
+    <small>REMOTE</small></span>
+  <span class="right">
+    <span class="dot" id="dot"></span>
+    <span class="readout"><span id="pct">--</span><small>%</small></span>
+  </span>
+</header>
+
+<div class="fader-zone">
+  <div class="fader" id="fader" role="slider" aria-label="Master volume"
+       aria-valuemin="0" aria-valuemax="100">
+    <div class="unity" id="unity"></div>
+    <div class="cap" id="cap"></div>
+  </div>
+</div>
+
+<div class="statusline" id="statusline">&nbsp;</div>
+
+<div class="times" id="times">
+  <button data-s="3">3s</button>
+  <button data-s="5" class="sel">5s</button>
+  <button data-s="8">8s</button>
+</div>
+
+<div class="actions">
+  <button id="btnIn">FADE IN</button>
+  <button id="btnOut">FADE OUT</button>
+</div>
+
+<div class="credit">© 2026 Avi Berger Productions. All rights reserved.</div>
+
+<script>
+const WS_PORT = '{{WS_PORT}}';
+const SEGS = 30;
+const fader = document.getElementById('fader');
+const cap   = document.getElementById('cap');
+const pct   = document.getElementById('pct');
+const dot   = document.getElementById('dot');
+const statusline = document.getElementById('statusline');
+const pinScreen  = document.getElementById('pinScreen');
+const pinInput   = document.getElementById('pinInput');
+const connState  = document.getElementById('connState');
+
+let level = 0, dragging = false, fadeSeconds = 5;
+let ws = null, authed = false, pin = '';
+let anim = null;
+let uiRestore = 0.8;
+
+/* LED segments */
+const segs = [];
+for (let i = 0; i < SEGS; i++) {
+  const s = document.createElement('div');
+  s.className = 'seg';
+  fader.appendChild(s);
+  segs.push(s);
+}
+
+const UNITY = 0.75;
+const unity = document.getElementById('unity');
+
+function render() {
+  const lit = Math.round(level * SEGS);
+  segs.forEach((s, i) => {
+    s.classList.toggle('lit', i < lit);
+    s.classList.toggle('top', i === lit - 1);
+  });
+  const pad = 12, capH = 36;
+  const usable = fader.clientHeight - pad * 2 - capH;
+  cap.style.bottom = (pad + usable * level) + 'px';
+  unity.style.bottom = (pad + usable * UNITY + capH / 2) + 'px';
+  pct.textContent = Math.round(level * 100);
+  dot.classList.toggle('off', level < 0.005);
+}
+
+/* ---- WebSocket ---- */
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+function connect() {
+  ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
+  ws.onopen = () => { if (pin) send({ type: 'hello', pin }); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'badpin') {
+      authed = false;
+      pinInput.classList.add('err');
+      setTimeout(() => pinInput.classList.remove('err'), 400);
+      return;
+    }
+    if (m.type === 'ok') {
+      authed = true;
+      pinScreen.style.display = 'none';
+      connState.classList.remove('show');
+      if (m.level > 0.05) uiRestore = m.level;
+    }
+    if ((m.type === 'ok' || m.type === 'status') && m.fadeSeconds && m.fadeSeconds !== fadeSeconds) {
+      syncTimeButtons(m.fadeSeconds);
+    }
+    if ((m.type === 'ok' || m.type === 'status') && !dragging && !anim) {
+      level = m.muted ? 0 : m.level;
+      if (m.state === 'idle') setStatus('', false);
+      render();
+    }
+  };
+  ws.onclose = () => {
+    if (authed) connState.classList.add('show');
+    setTimeout(connect, 1500);            // auto-reconnect, re-auth with saved pin
+  };
+}
+connect();
+
+document.getElementById('pinGo').addEventListener('click', tryPin);
+pinInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryPin(); });
+function tryPin() {
+  pin = pinInput.value.trim();
+  if (pin.length !== 4) { pinInput.classList.add('err'); setTimeout(()=>pinInput.classList.remove('err'),400); return; }
+  if (ws && ws.readyState === 1) send({ type: 'hello', pin });
+  else connect();
+}
+
+/* ---- client-side fade animation (mirrors the computer exactly) ---- */
+const smoothstep = t => t * t * (3 - 2 * t);
+function startAnim(target, duration) {
+  stopAnim();
+  const start = level, t0 = performance.now();
+  function frame(now) {
+    const t = Math.min(1, (now - t0) / (duration * 1000));
+    level = start + (target - start) * smoothstep(t);
+    render();
+    if (t < 1 && anim) anim.raf = requestAnimationFrame(frame);
+    else { anim = null; setStatus('', false); }
+  }
+  anim = { raf: requestAnimationFrame(frame) };
+}
+function stopAnim() { if (anim) { cancelAnimationFrame(anim.raf); anim = null; } }
+
+/* ---- dragging: יחסי, כמו פיידר אמיתי — בלי קפיצה לנקודת המגע ---- */
+let dragStartY = 0, dragStartLevel = 0;
+let lastSent = 0;
+function pushLevel() {
+  const now = performance.now();
+  if (now - lastSent > 25) { send({ type: 'set', level }); lastSent = now; }
+}
+fader.addEventListener('pointerdown', e => {
+  fader.setPointerCapture(e.pointerId);
+  stopAnim(); setStatus('', false); dragging = true;
+  dragStartY = e.clientY; dragStartLevel = level;
+  e.preventDefault();
+});
+fader.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const r = fader.getBoundingClientRect();
+  const usable = r.height - 24;
+  let v = dragStartLevel + (dragStartY - e.clientY) / usable;
+  level = Math.max(0, Math.min(1, v));
+  if (Math.abs(level - UNITY) < 0.008) level = UNITY;   // דיטנט ב-0dB
+  render(); pushLevel(); e.preventDefault();
+});
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  send({ type: 'set', level });          // final exact value
+  if (level > 0.05) uiRestore = level;
+}
+fader.addEventListener('pointerup', endDrag);
+fader.addEventListener('pointercancel', endDrag);
+
+/* ---- fade time ---- */
+function syncTimeButtons(sec) {
+  fadeSeconds = sec;
+  document.querySelectorAll('.times button')
+    .forEach(x => x.classList.toggle('sel', +x.dataset.s === sec));
+}
+document.getElementById('times').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  syncTimeButtons(+b.dataset.s);
+  send({ type: 'fadeSeconds', seconds: fadeSeconds });   // מסנכרן את כל המסכים
+});
+
+/* ---- actions ---- */
+function doFadeIn() {
+  const target = (level < uiRestore - 0.02) ? uiRestore : 1.0;
+  startAnim(target, fadeSeconds);
+  setStatus('FADING IN — tap to stop', true);
+  send({ type: 'fade', target, seconds: fadeSeconds });
+}
+function doFadeOut() {
+  if (level > 0.05) uiRestore = level;
+  startAnim(0, fadeSeconds);
+  setStatus('FADING OUT — tap to stop', true);
+  send({ type: 'fade', target: 0, seconds: fadeSeconds });
+}
+document.getElementById('btnIn').addEventListener('click', doFadeIn);
+document.getElementById('btnOut').addEventListener('click', doFadeOut);
+statusline.addEventListener('click', () => { stopAnim(); setStatus('', false); send({ type: 'stop' }); });
+
+function setStatus(txt, active) {
+  statusline.innerHTML = txt || '&nbsp;';
+  statusline.classList.toggle('active', !!active);
+}
+
+window.addEventListener('resize', render);
+render();
+</script>
+</body>
+</html>
