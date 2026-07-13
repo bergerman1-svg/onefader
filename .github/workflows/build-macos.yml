@@ -1,0 +1,46 @@
+name: Build macOS app
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyinstaller pywebview qrcode pillow websockets
+
+      - name: Build OneFader.app
+        run: >
+          pyinstaller --onefile --windowed --name OneFader
+          --icon OneFader.icns
+          --add-data "ui.html:."
+          --add-data "remote.html:."
+          onefader.py
+
+      - name: Zip the app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent dist/OneFader.app OneFader-Mac.zip
+
+      - name: Publish to "mac-latest" release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view mac-latest >/dev/null 2>&1 \
+            && gh release upload mac-latest OneFader-Mac.zip --clobber \
+            || gh release create mac-latest OneFader-Mac.zip \
+                 --title "OneFader for macOS — latest" \
+                 --notes "Automated macOS build. Unzip and open OneFader.app (first run: right-click → Open)."
