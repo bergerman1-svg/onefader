@@ -404,6 +404,14 @@ function doFadeOut() {
   setStatus('FADING OUT — click to stop', true);
   if (apiReady) pywebview.api.fade_to(0, fadeSeconds);
 }
+/* jump-and-fade to a preset level (keys 1–4). Uses the same smooth fade. */
+function fadeToLevel(target) {
+  target = Math.max(0, Math.min(1, target));
+  if (target > 0.05) uiRestore = target;   // becomes the level FADE IN returns to
+  startAnim(target, fadeSeconds);
+  setStatus('FADING TO ' + Math.round(target * 100) + '% — click to stop', true);
+  if (apiReady) pywebview.api.fade_to(target, fadeSeconds);
+}
 document.getElementById('btnIn').addEventListener('click', doFadeIn);
 document.getElementById('btnOut').addEventListener('click', doFadeOut);
 
@@ -418,14 +426,23 @@ statusline.addEventListener('click', stopFade);
 
 /* Space = smart fade (out if audible, in if silent). Esc = stop.
    Works no matter what's focused — the fader, a button, or nothing. */
+const PRESET_KEYS = {
+  Digit1: 0.25, Digit2: 0.50, Digit3: 0.75, Digit4: 1.0,
+  Numpad1: 0.25, Numpad2: 0.50, Numpad3: 0.75, Numpad4: 1.0,
+};
 document.addEventListener('keydown', e => {
   const t = e.target;
   const typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
-  if (e.code === 'Space' && !typing) {
+  if (typing) return;
+  if (e.code === 'Space') {
     e.preventDefault();          // also stops a focused button re-firing & page scroll
     (level > 0.01 ? doFadeOut() : doFadeIn());
+  } else if (PRESET_KEYS[e.code] !== undefined && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();          // 1–4 fade to 25 / 50 / 75 / 100 %
+    fadeToLevel(PRESET_KEYS[e.code]);
+  } else if (e.key === 'Escape') {
+    stopFade();
   }
-  if (e.key === 'Escape') stopFade();
 });
 
 function setStatus(txt, active) {
