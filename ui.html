@@ -416,11 +416,14 @@ async function stopFade() {
 }
 statusline.addEventListener('click', stopFade);
 
-/* Space = smart fade (out if audible, in if silent). Esc = stop. */
+/* Space = smart fade (out if audible, in if silent). Esc = stop.
+   Works no matter what's focused — the fader, a button, or nothing. */
 document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && e.target === document.body) {
+  const t = e.target;
+  const typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+  if (e.code === 'Space' && !typing) {
+    e.preventDefault();          // also stops a focused button re-firing & page scroll
     (level > 0.01 ? doFadeOut() : doFadeIn());
-    e.preventDefault();
   }
   if (e.key === 'Escape') stopFade();
 });
