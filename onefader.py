@@ -84,6 +84,13 @@ class WindowsVolume:
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
         devices = AudioUtilities.GetSpeakers()
+        # Newer pycaw returns an AudioDevice wrapper instead of the raw IMMDevice;
+        # the COM interface we need (.Activate) lives on the inner device.
+        if not hasattr(devices, "Activate"):
+            devices = (getattr(devices, "_dev", None)
+                       or getattr(devices, "dev", None)
+                       or getattr(devices, "_device", None)
+                       or devices)
         interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         self._volume = cast(interface, POINTER(IAudioEndpointVolume))
 
