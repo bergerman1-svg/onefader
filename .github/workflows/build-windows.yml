@@ -37,13 +37,29 @@ jobs:
           name: OneFader-Windows
           path: dist/OneFader.exe
 
-      - name: Publish to "win-latest" release
+      - name: Publish to "win-latest" release (keeps cumulative download count)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release view win-latest >/dev/null 2>&1 \
-            && gh release upload win-latest dist/OneFader.exe --clobber \
-            || gh release create win-latest dist/OneFader.exe \
-                 --title "OneFader for Windows — latest" \
-                 --notes "Automated Windows build. Double-click OneFader.exe to run — no Python needed."
+          TAG=win-latest
+          NOTES_HEAD="Automated Windows build. Double-click OneFader.exe to run — no Python needed."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # count downloads of the asset we are about to replace, add to the running total
+            CUR=$(gh api "repos/$REPO/releases/tags/$TAG" \
+                  --jq '[.assets[] | select(.name=="OneFader.exe") | .download_count] | add // 0')
+            PREV=$(gh release view "$TAG" --json body --jq .body \
+                   | grep -oE 'Total downloads \(all versions\): [0-9]+' | grep -oE '[0-9]+' || true)
+            TOTAL=$(( ${PREV:-0} + ${CUR:-0} ))
+            gh release upload "$TAG" dist/OneFader.exe --clobber
+            gh release edit "$TAG" --notes "$NOTES_HEAD
+
+          Total downloads (all versions): $TOTAL"
+          else
+            gh release create "$TAG" dist/OneFader.exe \
+              --title "OneFader for Windows — latest" \
+              --notes "$NOTES_HEAD
+
+          Total downloads (all versions): 0"
+          fi

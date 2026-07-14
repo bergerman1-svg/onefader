@@ -34,13 +34,28 @@ jobs:
       - name: Zip the app bundle
         run: ditto -c -k --sequesterRsrc --keepParent dist/OneFader.app OneFader-Mac.zip
 
-      - name: Publish to "mac-latest" release
+      - name: Publish to "mac-latest" release (keeps cumulative download count)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release view mac-latest >/dev/null 2>&1 \
-            && gh release upload mac-latest OneFader-Mac.zip --clobber \
-            || gh release create mac-latest OneFader-Mac.zip \
-                 --title "OneFader for macOS — latest" \
-                 --notes "Automated macOS build. Unzip and open OneFader.app (first run: right-click → Open)."
+          TAG=mac-latest
+          NOTES_HEAD="Automated macOS build. Unzip and open OneFader.app (first run: right-click → Open)."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            CUR=$(gh api "repos/$REPO/releases/tags/$TAG" \
+                  --jq '[.assets[] | select(.name=="OneFader-Mac.zip") | .download_count] | add // 0')
+            PREV=$(gh release view "$TAG" --json body --jq .body \
+                   | grep -oE 'Total downloads \(all versions\): [0-9]+' | grep -oE '[0-9]+' || true)
+            TOTAL=$(( ${PREV:-0} + ${CUR:-0} ))
+            gh release upload "$TAG" OneFader-Mac.zip --clobber
+            gh release edit "$TAG" --notes "$NOTES_HEAD
+
+          Total downloads (all versions): $TOTAL"
+          else
+            gh release create "$TAG" OneFader-Mac.zip \
+              --title "OneFader for macOS — latest" \
+              --notes "$NOTES_HEAD
+
+          Total downloads (all versions): 0"
+          fi
