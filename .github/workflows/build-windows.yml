@@ -27,6 +27,7 @@ jobs:
         run: >
           pyinstaller --onefile --windowed --name OneFader
           --icon OneFader.ico
+          --hidden-import rtmidi
           --add-data "ui.html;."
           --add-data "remote.html;."
           onefader.py

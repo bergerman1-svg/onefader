@@ -19,6 +19,7 @@ pip install --quiet --disable-pip-version-check pyinstaller
 echo "  Building OneFader.app (takes a minute)..."
 pyinstaller --onefile --windowed --name OneFader \
     --icon OneFader.icns \
+    --hidden-import rtmidi \
     --add-data "ui.html:." --add-data "remote.html:." onefader.py
 
 if [ -d "dist/OneFader.app" ]; then

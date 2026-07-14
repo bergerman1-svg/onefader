@@ -202,13 +202,28 @@ function render() {
 /* ---- WebSocket ---- */
 function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
+let reconnectTimer = null;
+function scheduleReconnect() {
+  // טיימר יחיד — אחרת כל ניתוק/לחיצה מוסיפים שרשרת reconnect מקבילה שלא מתה
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
+}
+
 function connect() {
+  if (ws) {                    // סוגרים חיבור קודם לפני שפותחים חדש
+    ws.onclose = null;
+    try { ws.close(); } catch (e) {}
+  }
   ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
   ws.onopen = () => { if (pin) send({ type: 'hello', pin }); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === 'badpin') {
+      // גם אחרי שהיינו מחוברים: האפליקציה אותחלה עם PIN חדש — חוזרים למסך ה-PIN
       authed = false;
+      pin = '';
+      pinScreen.style.display = '';
+      connState.classList.remove('show');
       pinInput.classList.add('err');
       setTimeout(() => pinInput.classList.remove('err'), 400);
       return;
@@ -230,7 +245,7 @@ function connect() {
   };
   ws.onclose = () => {
     if (authed) connState.classList.add('show');
-    setTimeout(connect, 1500);            // auto-reconnect, re-auth with saved pin
+    scheduleReconnect();                  // auto-reconnect, re-auth with saved pin
   };
 }
 connect();
@@ -296,6 +311,7 @@ const customBtn = document.getElementById('customBtn');
 let customValue = null;   // null until the user sets one
 
 function refreshCustomLabel() {
+  if (customBtn.querySelector('input')) return;   // mid-edit: a background sync must not wipe the field
   if (customValue == null) { customBtn.textContent = 'Custom'; customBtn.dataset.s = 'custom'; }
   else { customBtn.textContent = customValue + 's'; customBtn.dataset.s = customValue; }
 }
@@ -323,8 +339,10 @@ function editCustom() {
   const finish = save => {
     if (done) return; done = true;
     inp.removeEventListener('blur', onBlur);
+    const typed = inp.value;
+    inp.remove();                    // out of the DOM first, so the label can refresh
     if (save) {
-      let v = Math.round(parseFloat(inp.value));
+      let v = Math.round(parseFloat(typed));
       if (!isFinite(v)) v = customValue != null ? customValue : 5;
       customValue = Math.max(1, Math.min(60, v));
       applyFade(customValue);

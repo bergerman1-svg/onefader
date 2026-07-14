@@ -78,11 +78,15 @@ class SmoothedVolume:
 class WindowsVolume:
     """Master volume של Windows דרך pycaw."""
 
+    FAST = True  # pycaw מהיר — פיידים ב-50Hz
+
     def __init__(self):
         from ctypes import POINTER, cast
         from comtypes import CLSCTX_ALL
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
+        self._com_ready = threading.local()
+        self._ensure_com()
         devices = AudioUtilities.GetSpeakers()
         # Newer pycaw returns an AudioDevice wrapper instead of the raw IMMDevice;
         # the COM interface we need (.Activate) lives on the inner device.
@@ -94,16 +98,31 @@ class WindowsVolume:
         interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         self._volume = cast(interface, POINTER(IAudioEndpointVolume))
 
+    def _ensure_com(self):
+        """COM חייב אתחול פר-thread. הקריאות מגיעות מכל מיני threads —
+        ההחלקה, הפייד, גשר ה-JS, הרימוט וה-MIDI — לכן מאתחלים עצלנית בכל אחד."""
+        if getattr(self._com_ready, "done", False):
+            return
+        try:
+            import comtypes
+            comtypes.CoInitialize()
+        except Exception:
+            pass  # כבר מאותחל ב-thread הזה — בסדר גמור
+        self._com_ready.done = True
+
     def get(self) -> float:
+        self._ensure_com()
         return float(self._volume.GetMasterVolumeLevelScalar())
 
     def set(self, level: float):
+        self._ensure_com()
         level = max(0.0, min(1.0, float(level)))
         self._volume.SetMasterVolumeLevelScalar(level, None)
         if level > 0 and self._volume.GetMute():
             self._volume.SetMute(0, None)
 
     def is_muted(self) -> bool:
+        self._ensure_com()
         return bool(self._volume.GetMute())
 
     def settings(self):
@@ -228,9 +247,13 @@ class MacVolume:
 
     def set(self, level: float):
         v = round(max(0.0, min(1.0, float(level))) * 100)
-        if v == self._last_set:
-            return  # למק יש רק 100 מדרגות — לא שווה קריאת מערכת על אותו ערך
+        # דה-דופ קצר בלבד: מגן מספאם osascript בזמן החלקה, אבל פג אחרי 2ש'
+        # כדי שערך שהשתנה חיצונית (מקשי ווליום) לא ייתקע על המטמון לנצח.
+        now = time.time()
+        if v == self._last_set and now - getattr(self, "_last_set_t", 0) < 2.0:
+            return
         self._last_set = v
+        self._last_set_t = now
         self._run(f"set volume output volume {v}")
         if v > 0 and self.is_muted():
             self._run("set volume without output muted")
@@ -290,15 +313,21 @@ class FadeEngine:
         if level > 0.05:
             self.restore_level = level
 
-    def stop(self):
+    def _stop_locked(self):
         self._cancel.set()
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=0.2)
+            self._thread.join(timeout=0.5)
         self.state = "idle"
+
+    def stop(self):
+        # תמיד תחת נעילה — אחרת stop מ-thread אחד (טלפון/MIDI) יכול להצטלב
+        # עם fade_to מ-thread אחר, לבטל את האירוע הלא-נכון ולהשאיר פייד רץ.
+        with self._lock:
+            self._stop_locked()
 
     def fade_to(self, target: float, duration: float):
         with self._lock:
-            self.stop()
+            self._stop_locked()
             self._cancel = threading.Event()
             self.state = "fading_out" if target < self.vol.get() else "fading_in"
             self._thread = threading.Thread(
@@ -344,6 +373,7 @@ class MidiManager:
         self.bindings = {}       # slot -> {"type": "cc"|"note", "ch": int, "num": int, "port": str}
         self._ins = {}           # port_name -> MidiIn
         self._btn_state = {}     # slot -> last value (לזיהוי לחיצה ולא החזקה)
+        self._bind_lock = threading.Lock()   # callbacks של פורטים שונים רצים במקביל
         self._load()
         try:
             import rtmidi  # noqa: F401 — בדיקת זמינות בלבד
@@ -381,6 +411,11 @@ class MidiManager:
                 for i, name in enumerate(names):
                     if name not in self._ins:
                         mi = rtmidi.MidiIn()
+                        # ההתקנים יכלו להשתנות בין get_ports לפתיחה — מאמתים שהאינדקס
+                        # עדיין מצביע על אותו התקן, אחרת האירועים ישויכו לפורט הלא נכון
+                        cur = mi.get_ports()
+                        if i >= len(cur) or cur[i] != name:
+                            continue  # הרשימה השתנתה — נתפוס בסיבוב הבא
                         mi.open_port(i)
                         mi.set_callback(self._make_callback(name))
                         self._ins[name] = mi
@@ -425,13 +460,16 @@ class MidiManager:
             slot = self.learn_slot
             if slot == "volume" and etype != "cc":
                 return  # ווליום חייב פיידר/נוב (CC), לא כפתור
-            self.bindings[slot] = {"type": etype, "ch": ch, "num": num, "port": port}
-            self.learn_slot = None
+            with self._bind_lock:
+                self.bindings[slot] = {"type": etype, "ch": ch, "num": num, "port": port}
+                self.learn_slot = None
             self._save()
             return
 
         # --- normal operation ---
-        for slot, b in self.bindings.items():
+        with self._bind_lock:
+            snapshot = list(self.bindings.items())
+        for slot, b in snapshot:
             if b["type"] != etype or b["ch"] != ch or b["num"] != num:
                 continue
             if slot == "volume":
@@ -468,8 +506,9 @@ class MidiManager:
         return self.info()
 
     def clear(self, slot):
-        self.bindings.pop(slot, None)
-        self._btn_state.pop(slot, None)
+        with self._bind_lock:
+            self.bindings.pop(slot, None)
+            self._btn_state.pop(slot, None)
         self._save()
         return self.info()
 
@@ -503,11 +542,29 @@ class RemoteServer:
         self.api = api
         self.pin = None
         self.running = False
+        self.error = None
         self.clients = set()          # חיבורי WS מאומתים
         self._loop = None
 
+    def _ports_free(self) -> bool:
+        """בדיקה שהפורטים פנויים לפני שמכריזים שהשרת רץ — אחרת מופע שני
+        של האפליקציה מציג QR ו-PIN לשרת שבכלל שייך למופע הראשון."""
+        for port in (self.HTTP_PORT, self.WS_PORT):
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                probe.bind(("0.0.0.0", port))
+            except OSError:
+                return False
+            finally:
+                probe.close()
+        return True
+
     def start(self):
         if not self.running:
+            if not self._ports_free():
+                self.error = "Ports 1780/1781 are busy — is another OneFader already running?"
+                return self.info()
+            self.error = None
             self.pin = f"{secrets.randbelow(10000):04d}"
             self.running = True
             threading.Thread(target=self._http_thread, daemon=True).start()
@@ -518,6 +575,7 @@ class RemoteServer:
         url = f"http://{_local_ip()}:{self.HTTP_PORT}"
         return {
             "running": self.running,
+            "error": self.error,
             "url": url,
             "pin": self.pin,
             "qr": self._qr_datauri(url) if self.running else None,
@@ -556,8 +614,24 @@ class RemoteServer:
         import websockets
         logging.getLogger("websockets").setLevel(logging.CRITICAL)
 
+        def _origin_ok(ws) -> bool:
+            """דפדפן שולח Origin; מקבלים רק את דף הרימוט שלנו (פורט 1780).
+            בלי זה כל אתר שפתוח בדפדפן ברשת יכול לנסות PIN-ים ברקע."""
+            try:
+                origin = (getattr(ws, "request", None).headers.get("Origin")
+                          if getattr(ws, "request", None) else None)
+            except Exception:
+                origin = None
+            if not origin:
+                return True  # לקוח שאינו דפדפן (או ספרייה ישנה) — אין Origin
+            return origin.endswith(f":{self.HTTP_PORT}")
+
         async def handler(ws):
             authed = False
+            bad_pins = 0
+            if not _origin_ok(ws):
+                await ws.close()
+                return
             try:
                 async for raw in ws:
                     try:
@@ -570,17 +644,25 @@ class RemoteServer:
                             self.clients.add(ws)
                             await ws.send(json.dumps({"type": "ok", **self.api.status()}))
                         else:
+                            bad_pins += 1
+                            await asyncio.sleep(0.6 * bad_pins)   # מאט ניסיונות ניחוש
                             await ws.send(json.dumps({"type": "badpin"}))
+                            if bad_pins >= 5:
+                                await ws.close()                  # 10,000 צירופים? לא מהחיבור הזה
+                                return
                     elif authed:
-                        t = msg.get("type")
-                        if t == "set":
-                            self.api.set_level(msg.get("level", 0))
-                        elif t == "fade":
-                            self.api.fade_to(msg.get("target", 0), msg.get("seconds", 5))
-                        elif t == "stop":
-                            self.api.stop_fade()
-                        elif t == "fadeSeconds":
-                            self.api.set_fade_seconds(msg.get("seconds", 5))
+                        try:
+                            t = msg.get("type")
+                            if t == "set":
+                                self.api.set_level(msg.get("level", 0))
+                            elif t == "fade":
+                                self.api.fade_to(msg.get("target", 0), msg.get("seconds", 5))
+                            elif t == "stop":
+                                self.api.stop_fade()
+                            elif t == "fadeSeconds":
+                                self.api.set_fade_seconds(msg.get("seconds", 5))
+                        except Exception:
+                            pass  # הודעה פגומה (level שאינו מספר וכו') לא תנתק את הטלפון
             except websockets.exceptions.ConnectionClosed:
                 pass  # טלפון נעל מסך / יצא מהדף — צפוי, יתחבר מחדש לבד
             finally:
@@ -588,13 +670,15 @@ class RemoteServer:
 
         async def broadcaster():
             while True:
-                if self.clients:
-                    payload = json.dumps({"type": "status", **self.api.status()})
-                    import asyncio as aio
-                    await aio.gather(
-                        *[c.send(payload) for c in list(self.clients)],
-                        return_exceptions=True,
-                    )
+                try:
+                    if self.clients:
+                        payload = json.dumps({"type": "status", **self.api.status()})
+                        await asyncio.gather(
+                            *[c.send(payload) for c in list(self.clients)],
+                            return_exceptions=True,
+                        )
+                except Exception:
+                    pass  # status() נכשל רגעית (החלפת התקן פלט) — לא מפילים את השרת
                 await asyncio.sleep(0.05)  # 20Hz — CoreAudio זול, הסטטוס כמעט חי
 
         async def main():

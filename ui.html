@@ -187,6 +187,27 @@
   .midiCard .close{margin:2px auto 0; padding:10px 32px; border-radius:11px; border:1px solid var(--line);
     background:none; color:var(--text); font-family:var(--sans); font-size:14px; cursor:pointer}
 
+  /* ----- help overlay ----- */
+  #helpOverlay{position:fixed; inset:0; background:rgba(6,8,11,.86); backdrop-filter:blur(6px);
+    display:none; align-items:center; justify-content:center; z-index:30}
+  #helpOverlay.open{display:flex}
+  .helpCard{background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:24px 24px 20px; display:flex; flex-direction:column; gap:12px;
+    width:min(360px, 92vw); max-height:88vh; overflow-y:auto}
+  .helpCard h2{font-family:'Unbounded',var(--mono); font-size:15px; font-weight:800; text-align:center}
+  .helpCard h2 span{color:var(--led)}
+  .helpIntro{font-size:12.5px; color:var(--muted-text); text-align:center; line-height:1.55}
+  .helpIntro b{color:var(--text)}
+  .helpRow{display:flex; align-items:baseline; gap:10px; font-size:12.5px; line-height:1.5}
+  .helpRow .k{flex:none; min-width:86px; font-family:var(--mono); font-size:11px; font-weight:700;
+    color:var(--led); letter-spacing:.04em}
+  .helpRow .d{color:var(--muted-text)}
+  .helpRow .d b{color:var(--text); font-weight:600}
+  .helpSep{border:none; border-top:1px solid var(--line); margin:2px 0}
+  .helpCard .close{margin:4px auto 0; padding:10px 32px; border-radius:11px; border:1px solid var(--line);
+    background:none; color:var(--text); font-family:var(--sans); font-size:14px; cursor:pointer}
+  .helpQ{font-family:var(--mono); font-size:15px; font-weight:700; line-height:1}
+
   .credit{text-align:center; font-family:var(--mono); font-size:9.5px; letter-spacing:.08em;
     color:var(--muted-text); opacity:.8; margin-top:6px; flex:none}
 
@@ -218,6 +239,9 @@
     </span>
   </span>
   <span class="right">
+    <button class="remoteBtn" id="helpBtn" title="Help" aria-label="Help">
+      <span class="helpQ">?</span>
+    </button>
     <button class="remoteBtn" id="midiBtn" title="MIDI controller" aria-label="MIDI controller">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round">
@@ -274,6 +298,26 @@
     </div>
     <div class="midiHint" id="midiHint">Connect a controller, press LEARN, then move a fader or press a button on it.</div>
     <button class="close" id="midiClose">Close</button>
+  </div>
+</div>
+
+<div id="helpOverlay">
+  <div class="helpCard">
+    <h2>HOW IT <span>WORKS</span></h2>
+    <p class="helpIntro"><b>One fader — your computer's master volume.</b><br>
+      Works with anything that makes sound: Spotify, YouTube, VLC, any player.</p>
+    <hr class="helpSep">
+    <div class="helpRow"><span class="k">DRAG</span><span class="d">Set the volume instantly. Dragging cancels a running fade.</span></div>
+    <div class="helpRow"><span class="k">FADE IN/OUT</span><span class="d">Smooth fade to your last level / to silence. <b>3s · 5s · Custom</b> set how long it takes.</span></div>
+    <div class="helpRow"><span class="k">CLICK STATUS</span><span class="d">Click the “FADING…” line (or press <b>Esc</b>) to stop a fade mid-way.</span></div>
+    <hr class="helpSep">
+    <div class="helpRow"><span class="k">SPACE</span><span class="d">Smart fade — out if there's sound, in if it's silent.</span></div>
+    <div class="helpRow"><span class="k">1 · 2 · 3 · 4</span><span class="d">Fade to <b>25 / 50 / 75 / 100%</b>.</span></div>
+    <div class="helpRow"><span class="k">↑ ↓</span><span class="d">Fine tune (with <b>Shift</b> — bigger steps). Fader must be focused.</span></div>
+    <hr class="helpSep">
+    <div class="helpRow"><span class="k">📱 PHONE</span><span class="d">Tap the phone icon → scan the QR → type the PIN. Fader in your hand, same Wi-Fi.</span></div>
+    <div class="helpRow"><span class="k">🎛 MIDI</span><span class="d">Tap the MIDI icon → LEARN → move a fader or press a button on your controller.</span></div>
+    <button class="close" id="helpClose">Close</button>
   </div>
 </div>
 
@@ -452,6 +496,7 @@ const customBtn = document.getElementById('customBtn');
 let customValue = null;   // null until the user sets one
 
 function refreshCustomLabel() {
+  if (customBtn.querySelector('input')) return;   // mid-edit: a background sync must not wipe the field
   if (customValue == null) { customBtn.textContent = 'Custom'; customBtn.dataset.s = 'custom'; }
   else { customBtn.textContent = customValue + 's'; customBtn.dataset.s = customValue; }
 }
@@ -479,8 +524,10 @@ function editCustom() {
   const finish = save => {
     if (done) return; done = true;
     inp.removeEventListener('blur', onBlur);
+    const typed = inp.value;
+    inp.remove();                    // out of the DOM first, so the label can refresh
     if (save) {
-      let v = Math.round(parseFloat(inp.value));
+      let v = Math.round(parseFloat(typed));
       if (!isFinite(v)) v = customValue != null ? customValue : 5;
       customValue = Math.max(1, Math.min(60, v));
       applyFade(customValue);
@@ -555,7 +602,7 @@ const PRESET_KEYS = {
 document.addEventListener('keydown', e => {
   const t = e.target;
   const typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
-  if (typing) return;
+  if (typing || e.repeat) return;   // החזקת מקש לא תירה פיידים בצרורות
   if (e.code === 'Space') {
     e.preventDefault();          // also stops a focused button re-firing & page scroll
     (level > 0.01 ? doFadeOut() : doFadeIn());
@@ -563,7 +610,13 @@ document.addEventListener('keydown', e => {
     e.preventDefault();          // 1–4 fade to 25 / 50 / 75 / 100 %
     fadeToLevel(PRESET_KEYS[e.code]);
   } else if (e.key === 'Escape') {
-    stopFade();
+    const open = document.querySelector('#qrOverlay.open, #midiOverlay.open, #helpOverlay.open');
+    if (open) {
+      if (open.id === 'midiOverlay') midiCloseOverlay();   // also cancels a pending LEARN
+      else open.classList.remove('open');
+    } else {
+      stopFade();
+    }
   }
 });
 
@@ -593,6 +646,10 @@ const qrOverlay = document.getElementById('qrOverlay');
 document.getElementById('remoteBtn').addEventListener('click', async () => {
   if (!apiReady) return;
   const info = await pywebview.api.remote_start();
+  if (!info.running) {
+    setStatus(info.error || 'REMOTE FAILED TO START', true);
+    return;
+  }
   document.getElementById('qrImg').src = info.qr;
   document.getElementById('qrUrl').textContent = info.url;
   document.getElementById('qrPin').textContent = info.pin;
@@ -613,9 +670,11 @@ function describeBinding(b) {
 function renderMidi(info) {
   const ports = document.getElementById('midiPorts');
   if (!info.available) {
-    ports.innerHTML = 'MIDI support not installed';
+    ports.textContent = 'MIDI support not installed';
   } else if (info.ports.length) {
-    ports.innerHTML = '<b>●</b> ' + info.ports.join(' · ');
+    ports.textContent = '';
+    const dot = document.createElement('b'); dot.textContent = '●';
+    ports.append(dot, ' ' + info.ports.join(' · '));   // שם התקן הוא טקסט, לא HTML
   } else {
     ports.textContent = 'No MIDI device detected — plug one in';
   }
@@ -658,6 +717,12 @@ midiOverlay.addEventListener('click', async e => {
     renderMidi(await pywebview.api.midi_clear(slot));
   }
 });
+
+/* ---- help ---- */
+const helpOverlay = document.getElementById('helpOverlay');
+document.getElementById('helpBtn').addEventListener('click', () => helpOverlay.classList.add('open'));
+document.getElementById('helpClose').addEventListener('click', () => helpOverlay.classList.remove('open'));
+helpOverlay.addEventListener('click', e => { if (e.target === helpOverlay) helpOverlay.classList.remove('open'); });
 
 window.addEventListener('pywebviewready', () => { apiReady = true; });
 window.addEventListener('resize', render);
