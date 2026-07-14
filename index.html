@@ -176,6 +176,14 @@
     display:flex; align-items:center; justify-content:center; gap:7px; opacity:.8; flex-wrap:wrap}
   .beer-note svg{stroke:var(--muted); flex:none}
 
+  /* ---------- first-run help ---------- */
+  .firstrun{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:34px; text-align:left}
+  .firstrun .os{background:rgba(255,255,255,.02); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
+  .firstrun .os h4{font-size:14px; font-weight:700; margin-bottom:10px}
+  .firstrun .os ol{margin:0; padding-inline-start:18px; color:var(--muted); font-size:13.5px; line-height:1.7}
+  .firstrun .os b{color:var(--text); font-weight:600}
+  @media (max-width:640px){ .firstrun{grid-template-columns:1fr} }
+
   /* ---------- footer ---------- */
   footer{border-top:1px solid var(--line-soft); padding:34px 0; text-align:center}
   footer .brand{justify-content:center; margin-bottom:14px}
@@ -335,7 +343,25 @@
           <span class="txt">Download for Windows<small>.exe · Free</small></span>
         </a>
       </div>
-      <p class="os-note" style="margin-top:20px">First run on Mac: right-click → Open (bypasses Gatekeeper).</p>
+      <div class="firstrun">
+        <div class="os">
+          <h4>🍎 First run on Mac</h4>
+          <ol>
+            <li>Unzip, drag <b>OneFader</b> to Applications.</li>
+            <li><b>Right-click</b> the app → <b>Open</b>.</li>
+            <li>Click <b>Open</b> in the dialog — first time only.</li>
+          </ol>
+        </div>
+        <div class="os">
+          <h4>🪟 First run on Windows</h4>
+          <ol>
+            <li>In the download bar, choose <b>Keep</b>.</li>
+            <li>Double-click <b>OneFader.exe</b>.</li>
+            <li>If SmartScreen warns → <b>More info</b> → <b>Run anyway</b>.</li>
+          </ol>
+        </div>
+      </div>
+      <p class="os-note" style="margin-top:18px">Unsigned but safe — these one-time steps just tell your OS you trust it.</p>
     </div>
   </div>
 </section>
