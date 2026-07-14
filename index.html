@@ -150,6 +150,26 @@
   .dl-box h2{font-family:var(--disp); font-weight:800; font-size:clamp(26px,3.6vw,38px); margin-bottom:14px}
   .dl-box p{color:var(--muted); margin-bottom:32px}
 
+  /* ---------- FAQ ---------- */
+  .faq{padding:76px 0 30px}
+  .faqList{max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:12px}
+  .faqList details{background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    overflow:hidden; transition:border-color .2s}
+  .faqList details[open]{border-color:rgba(255,180,84,.35)}
+  .faqList summary{list-style:none; cursor:pointer; padding:18px 22px; display:flex;
+    align-items:center; gap:14px; font-weight:600; font-size:15.5px}
+  .faqList summary::-webkit-details-marker{display:none}
+  .faqList summary::before{content:"+"; flex:none; width:26px; height:26px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center; font-family:var(--mono);
+    font-weight:700; color:var(--led); background:rgba(255,180,84,.1);
+    border:1px solid rgba(255,180,84,.25); transition:transform .2s}
+  .faqList details[open] summary::before{content:"–"}
+  .faqList .a{padding:0 22px 20px 62px; color:var(--muted); font-size:14.5px; line-height:1.7}
+  .faqList .a b{color:var(--text); font-weight:600}
+  .faqList .a code{font-family:var(--mono); font-size:12.5px; color:var(--led);
+    background:rgba(255,180,84,.08); padding:2px 7px; border-radius:6px}
+  @media (max-width:640px){ .faqList .a{padding-left:22px} }
+
   /* ---------- donate / buy me a beer ---------- */
   .donate{padding:20px 0 84px}
   .beer-box{background:
@@ -367,6 +387,64 @@
         </div>
       </div>
       <p class="os-note" style="margin-top:18px">Unsigned but safe — these one-time steps just tell your OS you trust it.</p>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="faq">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Questions? Answers.</h2>
+      <p>The stuff people actually ask.</p>
+    </div>
+    <div class="faqList">
+      <details>
+        <summary>My computer says the app is from an "unknown developer" — is it safe?</summary>
+        <div class="a">Yes — OneFader just isn't code-signed yet (certificates cost hundreds of dollars a year, and the app is free).
+          It's a one-time step: on <b>Mac</b> right-click the app → <b>Open</b> → Open. On <b>Windows</b> choose <b>Keep</b> in the
+          download bar, then <b>More info → Run anyway</b> if SmartScreen appears.</div>
+      </details>
+      <details>
+        <summary>The phone remote won't connect. What do I check?</summary>
+        <div class="a">In this order:
+          <b>1)</b> Phone and computer must be on the <b>same Wi-Fi</b> (turn mobile data off for a moment to be sure).
+          <b>2)</b> If you typed the address manually, include the port: <code>http://YOUR-IP:1780</code> — or just scan the QR, it's already correct.
+          <b>3)</b> On Windows, allow OneFader in the firewall: Start → search <b>"Allow an app through Windows Firewall"</b> → tick OneFader on Private + Public.
+          <b>4)</b> School, office and municipal networks often <b>block devices from talking to each other</b> — that's the network, not the app. See the next question.</div>
+      </details>
+      <details>
+        <summary>I'm in a school / venue / office network and the remote can't reach the computer.</summary>
+        <div class="a">Managed networks usually isolate devices from each other. The reliable fix: <b>open a hotspot on your phone and
+          connect the computer to it</b> (or use Windows Mobile Hotspot and connect the phone to the computer). Then reopen the remote
+          and scan the new QR. OneFader needs <b>no internet</b> — a hotspot with zero reception still works perfectly. For live shows
+          we recommend a hotspot even when the venue Wi-Fi works: it's your own private network, under your control.</div>
+      </details>
+      <details>
+        <summary>The PIN suddenly stopped working.</summary>
+        <div class="a">A new PIN is generated every time the app (re)starts — that's on purpose. Tap the phone icon on the computer
+          and scan the fresh QR / type the new PIN.</div>
+      </details>
+      <details>
+        <summary>Does it work with Spotify / YouTube / VLC / PowerPoint?</summary>
+        <div class="a">Yes — OneFader controls the computer's <b>master volume</b>, so it works with anything that makes sound,
+          in any app or browser tab, with no setup.</div>
+      </details>
+      <details>
+        <summary>Does it need internet?</summary>
+        <div class="a">No. Everything runs locally on your computer and your Wi-Fi. Downloading the app is the only time you need
+          to be online.</div>
+      </details>
+      <details>
+        <summary>Which MIDI controllers work?</summary>
+        <div class="a">Any USB MIDI controller that sends standard CC or notes — Korg nanoKONTROL, Behringer, Akai, M-Audio,
+          keyboards with faders, and so on. Click the MIDI icon in the app, press <b>LEARN</b>, move your fader — done.
+          The mapping is remembered next time.</div>
+      </details>
+      <details>
+        <summary>Is it really free?</summary>
+        <div class="a">Really free. If it saved your show, you can <a href="#donate" style="color:var(--led)">buy me a beer</a> 🍺 — but
+          you don't have to.</div>
+      </details>
     </div>
   </div>
 </section>
