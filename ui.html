@@ -157,6 +157,36 @@
   .qrCard .close{margin-top:4px; padding:11px 34px; border-radius:11px; border:1px solid var(--line);
     background:none; color:var(--text); font-family:var(--sans); font-size:14px; cursor:pointer}
 
+  /* ----- MIDI overlay ----- */
+  #midiOverlay{position:fixed; inset:0; background:rgba(6,8,11,.86); backdrop-filter:blur(6px);
+    display:none; align-items:center; justify-content:center; z-index:30}
+  #midiOverlay.open{display:flex}
+  .midiCard{background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:26px 26px 22px; display:flex; flex-direction:column; gap:14px;
+    width:min(340px, 92vw)}
+  .midiCard h2{font-family:'Unbounded',var(--mono); font-size:15px; font-weight:800; text-align:center}
+  .midiCard h2 span{color:var(--led)}
+  .midiPorts{font-family:var(--mono); font-size:11px; color:var(--muted-text); text-align:center;
+    line-height:1.6; min-height:16px}
+  .midiPorts b{color:var(--ok); font-weight:700}
+  .midiRow{display:flex; align-items:center; gap:10px; padding:11px 12px;
+    border:1px solid var(--line); border-radius:12px; background:#0E1116}
+  .midiRow .name{flex:1; min-width:0}
+  .midiRow .name b{display:block; font-size:13.5px; font-weight:700}
+  .midiRow .name small{display:block; font-family:var(--mono); font-size:10px; color:var(--muted-text);
+    letter-spacing:.03em; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .midiRow button{padding:8px 13px; border-radius:9px; border:1px solid var(--line); background:none;
+    color:var(--text); font-family:var(--mono); font-size:11.5px; font-weight:700; cursor:pointer}
+  .midiRow button:hover{border-color:var(--led); color:var(--led)}
+  .midiRow button.learning{color:#1A1206; background:var(--led); border-color:var(--led);
+    animation:pulse 1s ease-in-out infinite}
+  .midiRow button.clear{padding:8px 10px; color:var(--muted-text)}
+  .midiRow button.clear:hover{color:var(--danger); border-color:var(--danger)}
+  @keyframes pulse{50%{opacity:.55}}
+  .midiHint{font-size:12px; color:var(--muted-text); text-align:center; line-height:1.5; min-height:16px}
+  .midiCard .close{margin:2px auto 0; padding:10px 32px; border-radius:11px; border:1px solid var(--line);
+    background:none; color:var(--text); font-family:var(--sans); font-size:14px; cursor:pointer}
+
   .credit{text-align:center; font-family:var(--mono); font-size:9.5px; letter-spacing:.08em;
     color:var(--muted-text); opacity:.8; margin-top:6px; flex:none}
 
@@ -188,6 +218,17 @@
     </span>
   </span>
   <span class="right">
+    <button class="remoteBtn" id="midiBtn" title="MIDI controller" aria-label="MIDI controller">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/>
+        <circle cx="12" cy="7.5" r="0.5" fill="currentColor"/>
+        <circle cx="7.5" cy="10" r="0.5" fill="currentColor"/>
+        <circle cx="16.5" cy="10" r="0.5" fill="currentColor"/>
+        <circle cx="9" cy="14.5" r="0.5" fill="currentColor"/>
+        <circle cx="15" cy="14.5" r="0.5" fill="currentColor"/>
+      </svg>
+    </button>
     <button class="remoteBtn" id="remoteBtn" title="Control from your phone" aria-label="Remote control">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -209,6 +250,30 @@
     <div class="pinlbl">PIN</div>
     <div class="hint">Scan with the phone camera.<br>Phone &amp; computer must be on the same Wi-Fi.</div>
     <button class="close" id="qrClose">Close</button>
+  </div>
+</div>
+
+<div id="midiOverlay">
+  <div class="midiCard">
+    <h2>MIDI <span>CONTROLLER</span></h2>
+    <div class="midiPorts" id="midiPorts">Scanning for devices…</div>
+    <div class="midiRow" data-slot="volume">
+      <span class="name"><b>Volume fader</b><small id="bind-volume">Not assigned</small></span>
+      <button class="learn" data-slot="volume">LEARN</button>
+      <button class="clear" data-slot="volume" title="Clear">✕</button>
+    </div>
+    <div class="midiRow" data-slot="fade_in">
+      <span class="name"><b>Fade In button</b><small id="bind-fade_in">Not assigned</small></span>
+      <button class="learn" data-slot="fade_in">LEARN</button>
+      <button class="clear" data-slot="fade_in" title="Clear">✕</button>
+    </div>
+    <div class="midiRow" data-slot="fade_out">
+      <span class="name"><b>Fade Out button</b><small id="bind-fade_out">Not assigned</small></span>
+      <button class="learn" data-slot="fade_out">LEARN</button>
+      <button class="clear" data-slot="fade_out" title="Clear">✕</button>
+    </div>
+    <div class="midiHint" id="midiHint">Connect a controller, press LEARN, then move a fader or press a button on it.</div>
+    <button class="close" id="midiClose">Close</button>
   </div>
 </div>
 
@@ -535,6 +600,64 @@ document.getElementById('remoteBtn').addEventListener('click', async () => {
 });
 document.getElementById('qrClose').addEventListener('click', () => qrOverlay.classList.remove('open'));
 qrOverlay.addEventListener('click', e => { if (e.target === qrOverlay) qrOverlay.classList.remove('open'); });
+
+/* ---- MIDI controller ---- */
+const midiOverlay = document.getElementById('midiOverlay');
+let midiPollTimer = null;
+
+function describeBinding(b) {
+  if (!b) return 'Not assigned';
+  const what = b.type === 'cc' ? 'CC ' + b.num : 'Note ' + b.num;
+  return what + ' · ch ' + (b.ch + 1) + (b.port ? ' · ' + b.port : '');
+}
+function renderMidi(info) {
+  const ports = document.getElementById('midiPorts');
+  if (!info.available) {
+    ports.innerHTML = 'MIDI support not installed';
+  } else if (info.ports.length) {
+    ports.innerHTML = '<b>●</b> ' + info.ports.join(' · ');
+  } else {
+    ports.textContent = 'No MIDI device detected — plug one in';
+  }
+  for (const slot of ['volume', 'fade_in', 'fade_out']) {
+    document.getElementById('bind-' + slot).textContent = describeBinding(info.bindings[slot]);
+    const btn = midiOverlay.querySelector('.learn[data-slot="' + slot + '"]');
+    const isLearning = info.learning === slot;
+    btn.classList.toggle('learning', isLearning);
+    btn.textContent = isLearning ? 'MOVE IT…' : 'LEARN';
+  }
+  document.getElementById('midiHint').textContent =
+    info.learning ? 'Now move the control on your MIDI device you want to use.'
+                  : 'Connect a controller, press LEARN, then move a fader or press a button on it.';
+}
+async function midiRefresh() {
+  if (!apiReady) return;
+  try { renderMidi(await pywebview.api.midi_info()); } catch (e) {}
+}
+document.getElementById('midiBtn').addEventListener('click', () => {
+  midiOverlay.classList.add('open');
+  midiRefresh();
+  midiPollTimer = setInterval(midiRefresh, 700);   // רואים חיבורים ולמידה בזמן אמת
+});
+function midiCloseOverlay() {
+  midiOverlay.classList.remove('open');
+  clearInterval(midiPollTimer);
+  if (apiReady) pywebview.api.midi_cancel_learn();
+}
+document.getElementById('midiClose').addEventListener('click', midiCloseOverlay);
+midiOverlay.addEventListener('click', e => { if (e.target === midiOverlay) midiCloseOverlay(); });
+midiOverlay.addEventListener('click', async e => {
+  const slot = e.target.dataset && e.target.dataset.slot;
+  if (!slot || !apiReady || e.target.tagName !== 'BUTTON') return;
+  if (e.target.classList.contains('learn')) {
+    const info = e.target.classList.contains('learning')
+      ? await pywebview.api.midi_cancel_learn()
+      : await pywebview.api.midi_learn(slot);
+    renderMidi(info);
+  } else if (e.target.classList.contains('clear')) {
+    renderMidi(await pywebview.api.midi_clear(slot));
+  }
+});
 
 window.addEventListener('pywebviewready', () => { apiReady = true; });
 window.addEventListener('resize', render);

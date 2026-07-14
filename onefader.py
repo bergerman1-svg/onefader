@@ -324,6 +324,156 @@ class FadeEngine:
             self.state = "idle"
 
 
+# ---------- MIDI: שלט/פיידר פיזי שולט באפליקציה ----------
+
+class MidiManager:
+    """קלט MIDI עם MIDI Learn. שלושה תפקידים: volume (פיידר/נוב, CC),
+    fade_in ו-fade_out (כפתורים, Note או CC). החיבורים נשמרים לקובץ
+    כך שהשלט זכור גם אחרי הפעלה מחדש. תומך בחיבור/ניתוק תוך כדי ריצה."""
+
+    SLOTS = ("volume", "fade_in", "fade_out")
+    CONFIG = os.path.join(os.path.expanduser("~"), ".onefader-midi.json")
+
+    def __init__(self, api):
+        self.api = api
+        self.available = False   # python-rtmidi מותקן?
+        self.error = None
+        self.ports = []          # שמות הכניסות הפתוחות
+        self.learn_slot = None   # תפקיד שממתין ללמידה
+        self.last_event = None   # אירוע אחרון שנקלט (להצגה ב-UI)
+        self.bindings = {}       # slot -> {"type": "cc"|"note", "ch": int, "num": int, "port": str}
+        self._ins = {}           # port_name -> MidiIn
+        self._btn_state = {}     # slot -> last value (לזיהוי לחיצה ולא החזקה)
+        self._load()
+        try:
+            import rtmidi  # noqa: F401 — בדיקת זמינות בלבד
+            self.available = True
+        except Exception as e:
+            self.error = f"python-rtmidi not installed ({e})"
+            return
+        threading.Thread(target=self._watch_ports, daemon=True).start()
+
+    # --- persistence ---
+    def _load(self):
+        try:
+            with open(self.CONFIG, encoding="utf-8") as f:
+                data = json.load(f)
+            self.bindings = {k: v for k, v in data.get("bindings", {}).items()
+                             if k in self.SLOTS}
+        except Exception:
+            self.bindings = {}
+
+    def _save(self):
+        try:
+            with open(self.CONFIG, "w", encoding="utf-8") as f:
+                json.dump({"bindings": self.bindings}, f, indent=2)
+        except Exception:
+            pass  # דיסק לקריאה בלבד וכו' — לא קריטי
+
+    # --- ports (hot-plug) ---
+    def _watch_ports(self):
+        import rtmidi
+        probe = rtmidi.MidiIn()
+        while True:
+            try:
+                names = probe.get_ports()
+                # כניסות חדשות
+                for i, name in enumerate(names):
+                    if name not in self._ins:
+                        mi = rtmidi.MidiIn()
+                        mi.open_port(i)
+                        mi.set_callback(self._make_callback(name))
+                        self._ins[name] = mi
+                # כניסות שנותקו
+                for name in list(self._ins):
+                    if name not in names:
+                        try:
+                            self._ins[name].close_port()
+                        except Exception:
+                            pass
+                        del self._ins[name]
+                self.ports = list(self._ins.keys())
+            except Exception:
+                pass  # rtmidi זרק באמצע רענון התקנים — ננסה שוב בסיבוב הבא
+            time.sleep(2)
+
+    # --- input handling ---
+    def _make_callback(self, port_name):
+        def cb(event, _data=None):
+            try:
+                self._handle(port_name, event[0])
+            except Exception:
+                pass  # הודעה חריגה לא תפיל את האפליקציה
+        return cb
+
+    def _handle(self, port, msg):
+        if len(msg) < 3:
+            return
+        status, num, val = msg[0], msg[1], msg[2]
+        kind = status & 0xF0
+        ch = status & 0x0F
+        if kind == 0xB0:
+            etype = "cc"
+        elif kind == 0x90 and val > 0:
+            etype = "note"
+        else:
+            return
+        self.last_event = {"type": etype, "ch": ch, "num": num, "val": val, "port": port}
+
+        # --- MIDI Learn ---
+        if self.learn_slot:
+            slot = self.learn_slot
+            if slot == "volume" and etype != "cc":
+                return  # ווליום חייב פיידר/נוב (CC), לא כפתור
+            self.bindings[slot] = {"type": etype, "ch": ch, "num": num, "port": port}
+            self.learn_slot = None
+            self._save()
+            return
+
+        # --- normal operation ---
+        for slot, b in self.bindings.items():
+            if b["type"] != etype or b["ch"] != ch or b["num"] != num:
+                continue
+            if slot == "volume":
+                self.api.set_level(val / 127.0)
+            else:
+                # כפתור: מגיבים לעליית ערך בלבד (לא להחזקה/שחרור)
+                prev = self._btn_state.get(slot, 0)
+                self._btn_state[slot] = val
+                pressed = (etype == "note") or (val >= 64 > prev)
+                if pressed:
+                    if slot == "fade_in":
+                        self.api.fade_in(self.api.fade_seconds)
+                    else:
+                        self.api.fade_out(self.api.fade_seconds)
+
+    # --- API for the UI ---
+    def info(self):
+        return {
+            "available": self.available,
+            "error": self.error,
+            "ports": self.ports,
+            "bindings": self.bindings,
+            "learning": self.learn_slot,
+            "lastEvent": self.last_event,
+        }
+
+    def learn(self, slot):
+        if slot in self.SLOTS:
+            self.learn_slot = slot
+        return self.info()
+
+    def cancel_learn(self):
+        self.learn_slot = None
+        return self.info()
+
+    def clear(self, slot):
+        self.bindings.pop(slot, None)
+        self._btn_state.pop(slot, None)
+        self._save()
+        return self.info()
+
+
 # ---------- Remote: שליטה מהטלפון דרך הדפדפן ----------
 
 def _local_ip() -> str:
@@ -462,6 +612,20 @@ class Api:
         self.fade_seconds = 5.0   # state משותף — כל המסכים מסונכרנים אליו
         self.engine = FadeEngine(self.vol)
         self.remote = RemoteServer(self)
+        self.midi = MidiManager(self)
+
+    # --- MIDI (שלט פיזי) ---
+    def midi_info(self):
+        return self.midi.info()
+
+    def midi_learn(self, slot):
+        return self.midi.learn(slot)
+
+    def midi_cancel_learn(self):
+        return self.midi.cancel_learn()
+
+    def midi_clear(self, slot):
+        return self.midi.clear(slot)
 
     def remote_start(self):
         """מדליק את השליטה מהטלפון ומחזיר URL + PIN + QR."""

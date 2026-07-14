@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 echo  Python found. Installing packages (first run only)...
-python -m pip install --quiet --disable-pip-version-check pywebview pycaw comtypes websockets qrcode pillow
+python -m pip install --quiet --disable-pip-version-check pywebview pycaw comtypes websockets qrcode pillow python-rtmidi
 if errorlevel 1 (
     echo.
     echo  Package install failed - check your internet connection and try again.

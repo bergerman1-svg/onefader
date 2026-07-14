@@ -21,7 +21,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install pyinstaller pywebview qrcode pillow websockets
+        run: pip install pyinstaller pywebview qrcode pillow websockets python-rtmidi
 
       - name: Build OneFader.app
         run: >
