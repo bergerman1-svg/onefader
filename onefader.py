@@ -353,6 +353,281 @@ class FadeEngine:
             self.state = "idle"
 
 
+# ---------- Auto-Ride: מד עוצמת שמע + בקר AGC ----------
+
+def _amp_db(x: float) -> float:
+    return 20.0 * math.log10(max(1e-6, x))
+
+
+class WindowsLoopbackMeter:
+    """WASAPI loopback — מודד את מה שבאמת יוצא לרמקולים (אחרי הווליום),
+    ולכן הבקר עובד במשוב סגור. בלי הרשאות, בלי דרייברים."""
+
+    POST_GAIN = True   # המדידה כוללת את הווליום שלנו → בקרת משוב
+
+    def __init__(self):
+        import pyaudiowpatch  # ImportError → הפיצ'ר לא זמין, נקי
+        self._pa_mod = pyaudiowpatch
+        self.rms_db = None          # None = אין מדידה תקפה כרגע
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        self.rms_db = None
+
+    def _loop(self):
+        import struct
+        pa = self._pa_mod.PyAudio()
+        try:
+            while not self._stop.is_set():
+                try:
+                    info = pa.get_default_wasapi_loopback()
+                    rate = int(info["defaultSampleRate"])
+                    ch = max(1, int(info["maxInputChannels"]))
+                    frames = max(256, rate // 10)   # חלונות של ~100ms
+                    st = pa.open(format=self._pa_mod.paFloat32, channels=ch,
+                                 rate=rate, input=True,
+                                 input_device_index=info["index"],
+                                 frames_per_buffer=frames)
+                    while not self._stop.is_set():
+                        data = st.read(frames, exception_on_overflow=False)
+                        n = len(data) // 4
+                        if n:
+                            vals = struct.unpack(f"<{n}f", data)
+                            acc = 0.0
+                            for v in vals:
+                                acc += v * v
+                            self.rms_db = _amp_db((acc / n) ** 0.5)
+                    st.close()
+                except Exception:
+                    # התקן פלט התחלף / נעלם — מנסים לפתוח מחדש עוד שנייה
+                    self.rms_db = None
+                    if self._stop.wait(1.0):
+                        break
+        finally:
+            pa.terminate()
+
+
+class MacSystemTapMeter:
+    """Core Audio process tap (macOS 14.2+) — מודד את סכום האודיו של כל
+    התהליכים לפני ווליום ההתקן → הבקר עובד בהזנה-קדימה (feedforward).
+    דורש אישור חד-פעמי של System Audio Recording."""
+
+    POST_GAIN = False
+
+    def __init__(self):
+        import ctypes
+        import objc  # מגיע עם pywebview במק
+        self._ct = ctypes
+        CATapDescription = objc.lookUpClass("CATapDescription")  # ימות על מק ישן
+        self._ca = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreAudio.framework/CoreAudio")
+        desc = CATapDescription.alloc().initStereoGlobalTapButExcludeProcesses_([])
+        desc.setName_("OneFader AutoRide meter")
+        tap_id = ctypes.c_uint32(0)
+        err = self._ca.AudioHardwareCreateProcessTap(
+            ctypes.c_void_p(objc.pyobjc_id(desc)), ctypes.byref(tap_id))
+        if err or not tap_id.value:
+            raise OSError(f"process tap failed (err={err}) — permission denied?")
+        self._tap_id = tap_id.value
+        self._desc = desc          # מחזיקים חי — אחרת ה-tap נהרס
+        self._agg_id = None
+        self._ioproc = None
+        self.rms_db = None
+        self._make_aggregate(objc)
+
+    def _make_aggregate(self, objc):
+        """התקן aggregate פרטי שמכיל רק את ה-tap — ממנו קוראים את הדגימות."""
+        import ctypes
+        import uuid
+        from Foundation import NSDictionary
+        tap_uuid = self._desc.UUID().UUIDString()
+        cfg = NSDictionary.dictionaryWithDictionary_({
+            "uid": str(uuid.uuid4()),
+            "name": "OneFader AutoRide",
+            "private": True,
+            "taps": [{"uid": str(tap_uuid), "drift": True}],
+        })
+        agg = ctypes.c_uint32(0)
+        err = self._ca.AudioHardwareCreateAggregateDevice(
+            ctypes.c_void_p(objc.pyobjc_id(cfg)), ctypes.byref(agg))
+        if err or not agg.value:
+            raise OSError(f"aggregate device failed (err={err})")
+        self._agg_id = agg.value
+
+    def start(self):
+        import ctypes
+        ct = ctypes
+        IOProc = ct.CFUNCTYPE(ct.c_int32, ct.c_uint32, ct.c_void_p, ct.c_void_p,
+                              ct.c_void_p, ct.c_void_p, ct.c_void_p, ct.c_void_p)
+        meter = self
+
+        def ioproc(dev, now, in_data, in_time, out_data, out_time, ctx):
+            try:
+                if in_data:
+                    # AudioBufferList: UInt32 mNumberBuffers; ואז buffers
+                    nbuf = ct.cast(in_data, ct.POINTER(ct.c_uint32))[0]
+                    if nbuf:
+                        # AudioBuffer: UInt32 mNumberChannels, UInt32 mDataByteSize, void* mData
+                        base = in_data + 4 + 4  # padding מיושר ל-8 על arm64
+                        hdr = ct.cast(base, ct.POINTER(ct.c_uint32))
+                        nbytes = hdr[1]
+                        dptr = ct.cast(base + 8, ct.POINTER(ct.c_void_p))[0]
+                        n = min(nbytes // 4, 4096)
+                        if dptr and n:
+                            vals = ct.cast(dptr, ct.POINTER(ct.c_float * n))[0]
+                            acc = 0.0
+                            for v in vals:
+                                acc += v * v
+                            meter.rms_db = _amp_db((acc / n) ** 0.5)
+            except Exception:
+                pass
+            return 0
+
+        self._ioproc_cb = IOProc(ioproc)   # reference חי — אחרת ה-GC הורג את ה-callback
+        proc_id = ct.c_void_p(0)
+        err = self._ca.AudioDeviceCreateIOProcID(
+            self._agg_id, self._ioproc_cb, None, ct.byref(proc_id))
+        if err:
+            raise OSError(f"IOProc failed (err={err})")
+        self._ioproc = proc_id
+        err = self._ca.AudioDeviceStart(self._agg_id, proc_id)
+        if err:
+            raise OSError(f"AudioDeviceStart failed (err={err})")
+
+    def stop(self):
+        try:
+            if self._ioproc:
+                self._ca.AudioDeviceStop(self._agg_id, self._ioproc)
+                self._ca.AudioDeviceDestroyIOProcID(self._agg_id, self._ioproc)
+                self._ioproc = None
+            if self._agg_id:
+                self._ca.AudioHardwareDestroyAggregateDevice(self._agg_id)
+                self._agg_id = None
+            if self._tap_id:
+                self._ca.AudioHardwareDestroyProcessTap(self._tap_id)
+                self._tap_id = None
+        except Exception:
+            pass
+        self.rms_db = None
+
+
+def make_meter():
+    if sys.platform == "win32":
+        return WindowsLoopbackMeter()
+    if sys.platform == "darwin":
+        return MacSystemTapMeter()
+    raise OSError("no meter for this platform")
+
+
+class AutoRide:
+    """מחזיק את העוצמה הנשמעת קבועה: נועל יעד ברגע ההפעלה ורוכב על
+    הפיידר כדי לפצות על שירים חזקים/חלשים. שקט (מעבר בין שירים) מקפיא
+    את הרכיבה כדי לא להרים ווליום בין שירים."""
+
+    GATE_DB = -55.0     # מתחת לזה = שקט, מקפיאים
+    RANGE_DB = 12.0     # תקרת פיצוי סביב נקודת ההפעלה
+    TICK = 0.1
+    EMA_TC = 0.8        # החלקת המדידה — שלא נגיב לכל תוף
+
+    def __init__(self, api):
+        self.api = api
+        self.active = False
+        self.state = "off"          # off | listening | locked
+        self.error = None
+        self.meter = None
+        self._stop = threading.Event()
+        self._thread = None
+        self._ema = None
+        self._target = None
+        self._anchor_scalar = None  # הווליום בנקודת הנעילה
+        self._relock_at = 0.0
+
+    # --- lifecycle ---
+    def toggle(self):
+        return self.disengage() if self.active else self.engage()
+
+    def engage(self):
+        try:
+            self.meter = make_meter()
+            self.meter.start()
+        except Exception as e:
+            self.meter = None
+            self.error = str(e) or "audio meter unavailable"
+            return self.info()
+        self.error = None
+        self.active = True
+        self.state = "listening"
+        self._ema = None
+        self._target = None
+        self._anchor_scalar = self.api.vol.get()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        return self.info()
+
+    def disengage(self):
+        self.active = False
+        self.state = "off"
+        self._stop.set()
+        if self.meter:
+            self.meter.stop()
+            self.meter = None
+        return self.info()
+
+    def notify_manual(self):
+        """המשתמש גרר ידנית באמצע רכיבה — הרמה החדשה היא היעד החדש."""
+        if self.active:
+            self.state = "listening"
+            self._target = None
+            self._relock_at = time.time() + 1.2   # לתת להחלקה להתייצב
+
+    def info(self):
+        return {"active": self.active, "state": self.state, "error": self.error}
+
+    # --- the ride itself ---
+    def _loop(self):
+        alpha = 1.0 - math.exp(-self.TICK / self.EMA_TC)
+        while not self._stop.wait(self.TICK):
+            m = self.meter.rms_db if self.meter else None
+            if m is None or m < self.GATE_DB:
+                continue                       # שקט/אין מדידה — מקפיאים הכל
+            self._ema = m if self._ema is None else self._ema + alpha * (m - self._ema)
+            now = time.time()
+            if self._target is None:
+                if now >= self._relock_at:
+                    self._target = self._ema
+                    self._anchor_scalar = self.api.vol.get()
+                    self.state = "locked"
+                continue
+            if self.api.engine.state != "idle":
+                continue                       # פייד ידני מנצח — לא נלחמים בו
+            err_db = self._target - self._ema
+            if abs(err_db) < 0.8:
+                continue                       # דד-בנד — יציבות בלי ריצודים
+            cur = self.api.vol.get()
+            if getattr(self.meter, "POST_GAIN", True):
+                # משוב סגור: צעדים קטנים עד שהמדידה חוזרת ליעד
+                step = max(-0.02, min(0.02, err_db * 0.004))
+                new = cur + step
+            else:
+                # הזנה-קדימה: המדידה לא כוללת את הווליום — מפצים ישירות
+                new = self._anchor_scalar * (10.0 ** (err_db / 20.0))
+                new = cur + max(-0.02, min(0.02, new - cur))   # מגביל סלו
+            lo = self._anchor_scalar * (10.0 ** (-self.RANGE_DB / 20.0))
+            hi = min(1.0, self._anchor_scalar * (10.0 ** (self.RANGE_DB / 20.0)))
+            new = max(lo, min(hi, new))
+            if abs(new - cur) >= 0.001:
+                self.api.vol.set(new)
+                self.api.engine.remember_level(new)
+
+
 # ---------- MIDI: שלט/פיידר פיזי שולט באפליקציה ----------
 
 class MidiManager:
@@ -697,6 +972,12 @@ class Api:
         self.engine = FadeEngine(self.vol)
         self.remote = RemoteServer(self)
         self.midi = MidiManager(self)
+        self.ride = AutoRide(self)
+
+    # --- Auto-Ride ---
+    def ride_toggle(self):
+        self.ride.toggle()
+        return self.status()
 
     # --- MIDI (שלט פיזי) ---
     def midi_info(self):
@@ -726,6 +1007,7 @@ class Api:
             "state": self.engine.state,
             "restore": self.engine.restore_level,
             "fadeSeconds": self.fade_seconds,
+            "ride": self.ride.info(),
         }
 
     def set_fade_seconds(self, seconds):
@@ -736,10 +1018,11 @@ class Api:
         return self.status()
 
     def set_level(self, level):
-        """גרירה ידנית של הפיידר — מבטלת פייד פעיל."""
+        """גרירה ידנית של הפיידר — מבטלת פייד פעיל. ברכיבה: נועל יעד חדש."""
         self.engine.stop()
         self.vol.set(level)
         self.engine.remember_level(float(level))
+        self.ride.notify_manual()
         return self.status()
 
     def fade_to(self, target, seconds):
@@ -773,7 +1056,34 @@ def ui_path() -> str:
     return os.path.join(base, "ui.html")
 
 
+def _ride_test():
+    """מצב שירות: `OneFader --ride-test` מדפיס את מד ה-Auto-Ride ל-15 שניות.
+    כותב גם ל-log קבוע — כשמפעילים דרך open/דאבל-קליק אין stdout."""
+    logpath = os.path.join(os.path.expanduser("~"), "onefader-ride-test.log")
+    logf = open(logpath, "w", encoding="utf-8")
+
+    def out(*a):
+        print(*a, flush=True)
+        print(*a, file=logf, flush=True)
+
+    out("creating system-audio meter…")
+    try:
+        meter = make_meter()
+        meter.start()
+    except Exception as e:
+        out("METER UNAVAILABLE:", e)
+        return
+    for i in range(30):
+        time.sleep(0.5)
+        out(f"[{i:02}] rms_db = {meter.rms_db}")
+    meter.stop()
+    out("done")
+
+
 def main():
+    if "--ride-test" in sys.argv:
+        _ride_test()
+        return
     api = Api()
     backend = type(api.vol.raw).__name__
     if backend == "MacCoreAudioVolume":

@@ -22,6 +22,8 @@ pyinstaller --onefile --windowed --name OneFader \
     --hidden-import rtmidi \
     --add-data "ui.html:." --add-data "remote.html:." onefader.py
 
+/usr/libexec/PlistBuddy -c "Add :NSAudioCaptureUsageDescription string 'OneFader listens to the computer audio level so Auto-Ride can keep your volume steady.'" dist/OneFader.app/Contents/Info.plist 2>/dev/null
+
 if [ -d "dist/OneFader.app" ]; then
     echo
     echo "  DONE!  Send users:  dist/OneFader.app"

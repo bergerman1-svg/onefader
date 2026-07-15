@@ -18,7 +18,7 @@ echo  Installing PyInstaller...
 python -m pip install --quiet --disable-pip-version-check pyinstaller
 
 echo  Building OneFader.exe (this takes a minute)...
-python -m PyInstaller --onefile --windowed --name OneFader --icon OneFader.ico --hidden-import rtmidi --add-data "ui.html;." --add-data "remote.html;." onefader.py
+python -m PyInstaller --onefile --windowed --name OneFader --icon OneFader.ico --hidden-import rtmidi --collect-all pyaudiowpatch --add-data "ui.html;." --add-data "remote.html;." onefader.py
 
 if exist "dist\OneFader.exe" (
     echo.

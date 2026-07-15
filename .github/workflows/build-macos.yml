@@ -32,6 +32,12 @@ jobs:
           --add-data "remote.html:."
           onefader.py
 
+      - name: Declare audio-capture usage (Auto-Ride)
+        run: >
+          /usr/libexec/PlistBuddy -c "Add :NSAudioCaptureUsageDescription string
+          'OneFader listens to the computer audio level so Auto-Ride can keep your volume steady.'"
+          dist/OneFader.app/Contents/Info.plist
+
       - name: Zip the app bundle
         run: ditto -c -k --sequesterRsrc --keepParent dist/OneFader.app OneFader-Mac.zip
 

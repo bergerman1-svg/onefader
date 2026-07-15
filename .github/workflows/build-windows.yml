@@ -21,13 +21,14 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install pyinstaller pywebview pycaw comtypes websockets qrcode pillow python-rtmidi
+        run: pip install pyinstaller pywebview pycaw comtypes websockets qrcode pillow python-rtmidi pyaudiowpatch
 
       - name: Build OneFader.exe
         run: >
           pyinstaller --onefile --windowed --name OneFader
           --icon OneFader.ico
           --hidden-import rtmidi
+          --collect-all pyaudiowpatch
           --add-data "ui.html;."
           --add-data "remote.html;."
           onefader.py
