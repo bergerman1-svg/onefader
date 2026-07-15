@@ -353,6 +353,50 @@ class FadeEngine:
             self.state = "idle"
 
 
+# ---------- רישוי: תשתית Free/Pro (שקטה — בעידן ההשקה הכל פתוח) ----------
+
+PRO_FEATURES = ("remote", "midi", "ride")   # מה ייסגר מאחורי Pro כשנפעיל חנות
+
+
+class License:
+    """מפתח רישיון מקומי. FOUNDER_ERA=True ⇒ הכל פתוח לכולם (עידן ההשקה).
+    כשתקום חנות (Lemon Squeezy/Gumroad): FOUNDER_ERA=False + אימות מפתח
+    מול ה-API של המנפיק ב-save()."""
+
+    FOUNDER_ERA = True
+    PATH = os.path.join(os.path.expanduser("~"), ".onefader-license.json")
+
+    def __init__(self):
+        self.key = None
+        self.email = None
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self.PATH, encoding="utf-8") as f:
+                d = json.load(f)
+            self.key = d.get("key")
+            self.email = d.get("email")
+        except Exception:
+            pass
+
+    def save(self, key, email=None):
+        self.key, self.email = key, email
+        try:
+            with open(self.PATH, "w", encoding="utf-8") as f:
+                json.dump({"key": key, "email": email}, f, indent=2)
+        except Exception:
+            pass
+
+    def is_pro(self) -> bool:
+        if self.FOUNDER_ERA:
+            return True
+        return bool(self.key)   # כשנדליק: כאן ייכנס אימות אמיתי של המפתח
+
+    def allows(self, feature: str) -> bool:
+        return feature not in PRO_FEATURES or self.is_pro()
+
+
 # ---------- Auto-Ride: מד עוצמת שמע + בקר AGC ----------
 
 def _amp_db(x: float) -> float:
@@ -977,9 +1021,12 @@ class Api:
         self.remote = RemoteServer(self)
         self.midi = MidiManager(self)
         self.ride = AutoRide(self)
+        self.license = License()
 
     # --- Auto-Ride ---
     def ride_toggle(self):
+        if not self.license.allows("ride"):
+            return self.status()
         self.ride.toggle()
         return self.status()
 
@@ -988,6 +1035,8 @@ class Api:
         return self.midi.info()
 
     def midi_learn(self, slot):
+        if not self.license.allows("midi"):
+            return self.midi.info()
         return self.midi.learn(slot)
 
     def midi_cancel_learn(self):
@@ -998,6 +1047,8 @@ class Api:
 
     def remote_start(self):
         """מדליק את השליטה מהטלפון ומחזיר URL + PIN + QR."""
+        if not self.license.allows("remote"):
+            return {"running": False, "error": "Phone remote is a Pro feature"}
         return self.remote.start()
 
     def remote_info(self):
@@ -1012,6 +1063,7 @@ class Api:
             "restore": self.engine.restore_level,
             "fadeSeconds": self.fade_seconds,
             "ride": self.ride.info(),
+            "pro": self.license.is_pro(),
         }
 
     def set_fade_seconds(self, seconds):
