@@ -333,7 +333,6 @@
     <hr class="helpSep">
     <div class="helpRow"><span class="k">📱 PHONE</span><span class="d">Tap the phone icon → scan the QR → type the PIN. Fader in your hand, same Wi-Fi.</span></div>
     <div class="helpRow"><span class="k">🎛 MIDI</span><span class="d">Tap the MIDI icon → LEARN → move a fader or press a button on your controller.</span></div>
-    <div class="helpRow"><span class="k">〰 RIDE</span><span class="d">Auto-Ride keeps loudness steady across tracks — great for playlists. It locks your current level and rides the fader for you. Drag to re-lock; silence between songs is ignored.</span></div>
     <button class="close" id="helpClose">Close</button>
   </div>
 </div>
@@ -344,14 +343,7 @@
     <div class="unity" id="unity"></div>
     <div class="cap" id="cap"></div>
   </div>
-  <button id="rideBtn" title="Auto-Ride — keeps the loudness steady across tracks">
-    <svg class="rideDot" width="20" height="14" viewBox="0 0 24 16" fill="none"
-         stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <path d="M1 8 C4 8 4 2 7 2 S10 14 13 14 16 5 19 5 22 8 23 8"/>
-    </svg>
-    <span>RIDE</span>
-    <span class="sub" id="rideSub"></span>
-  </button>
+  <!-- Auto-Ride button lives here when the feature ships (backend is ready) -->
 </div>
 
 <div class="statusline" id="statusline">&nbsp;</div>
@@ -659,7 +651,6 @@ async function poll() {
       const s = await pywebview.api.status();
       level = s.muted ? 0 : s.level;
       if (s.fadeSeconds && s.fadeSeconds !== fadeSeconds) syncTimeButtons(s.fadeSeconds);
-      if (s.ride) renderRide(s.ride);
       if (!poll.seeded && level > 0.05) { uiRestore = level; poll.seeded = true; }
       render();
     } catch (err) { /* window still booting */ }
@@ -667,24 +658,8 @@ async function poll() {
   setTimeout(poll, 60);   // CoreAudio זול — 16Hz נותן תחושת סימולטניות עם הרימוט
 }
 
-/* ---- Auto-Ride ---- */
-const rideBtn = document.getElementById('rideBtn');
-const rideSub = document.getElementById('rideSub');
-function renderRide(r) {
-  rideBtn.classList.toggle('on', r.active);
-  rideSub.textContent = !r.active ? '' :
-    (r.state === 'locked' ? 'LOCKED' : 'LISTEN…');
-}
-rideBtn.addEventListener('click', async () => {
-  if (!apiReady) return;
-  const s = await pywebview.api.ride_toggle();
-  if (s.ride) {
-    renderRide(s.ride);
-    if (s.ride.error) setStatus('AUTO-RIDE UNAVAILABLE — ' + s.ride.error, true);
-    else if (s.ride.active) setStatus('AUTO-RIDE ON — keeping the level steady', true);
-    else setStatus('', false);
-  }
-});
+/* Auto-Ride UI intentionally not wired yet — backend (AutoRide + ride_toggle)
+   is ready and tested; ships once Mac audio-capture signing is sorted. */
 
 /* ---- phone remote ---- */
 const qrOverlay = document.getElementById('qrOverlay');

@@ -522,6 +522,10 @@ def make_meter():
     if sys.platform == "win32":
         return WindowsLoopbackMeter()
     if sys.platform == "darwin":
+        # הצנרת עובדת, אבל macOS משתיק את ה-tap לאפליקציה לא חתומה (אין ייחוס
+        # TCC) — עד שנחתום ב-Developer ID, עדיף הודעה כנה מכפתור שמאזין לנצח.
+        if not os.environ.get("ONEFADER_MAC_RIDE"):
+            raise OSError("Auto-Ride is coming to Mac soon (Windows has it today)")
         return MacSystemTapMeter()
     raise OSError("no meter for this platform")
 
